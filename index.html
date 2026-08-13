@@ -164,6 +164,10 @@ function loadMsal(){
   .ms-btn{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;font-size:.75rem;padding:6px 12px;cursor:pointer;font-weight:600;}
   .ms-btn:hover{background:rgba(255,255,255,.28);}
   .ms-info{display:none;font-size:.68rem;color:#a9cfb2;margin-top:3px;text-align:right;word-break:break-all;}
+  .sync-status{display:none;font-size:.66rem;margin-top:4px;text-align:right;font-weight:700;padding:2px 8px;border-radius:10px;}
+  .sync-status.ok{color:#d6f0da;background:rgba(255,255,255,.12);}
+  .sync-status.saving{color:#fff;background:rgba(193,84,28,.55);}
+  .sync-status.warn{color:#ffe0b2;background:rgba(163,49,42,.5);}
   .overlay{display:none;position:fixed;inset:0;background:var(--azul-escuro);z-index:1000;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;}
   .overlay .box{background:#fff;border-radius:10px;padding:40px 32px;max-width:420px;width:100%;}
   .overlay .box h2{font-family:var(--fonte-titulo);color:var(--azul-escuro);margin:0 0 10px;}
@@ -194,6 +198,7 @@ function loadMsal(){
       <div style="text-align:right;">
         <button id="btn-ms-login" class="ms-btn" type="button"><span id="ms-login-label">⏳ Inicializando...</span></button>
         <div id="ms-user-info" class="ms-info"></div>
+        <div id="sync-status" class="sync-status"></div>
       </div>
     </div>
   </div>
@@ -644,6 +649,7 @@ function renderLancamento(){
       const k = d+'|'+loja;
       if(!state.lanc[k]) state.lanc[k]={ct:0,or:0,vq:0,ft:0};
       state.lanc[k][campo] = n(inp.value);
+      dirtyLanc.add(k);
       save();
       // atualiza só a linha de total sem redesenhar tudo (evita perder foco)
       const tr = document.querySelector('#tbl-lanc tbody tr.total-row');
@@ -782,12 +788,12 @@ function renderParametros(){
       return `<tr><td>${ddmm(D(fr.data))}/${D(fr.data).getFullYear()}</td><td>${escapeHtml(fr.desc)}</td>
         <td><button class="btn danger small" data-rem-fer="${realIdx}" type="button">remover</button></td></tr>`;
     }).join('') || `<tr><td colspan="3" style="color:var(--texto-suave)">Nenhum feriado cadastrado.</td></tr>`;
-  document.querySelectorAll('[data-rem-fer]').forEach(b=>b.onclick=()=>{ state.config.feriados.splice(+b.dataset.remFer,1); save(); renderParametros(); });
+  document.querySelectorAll('[data-rem-fer]').forEach(b=>b.onclick=()=>{ state.config.feriados.splice(+b.dataset.remFer,1); dirtyConfig.add('feriados'); save(); renderParametros(); });
 
   document.querySelector('#tbl-lojas tbody').innerHTML = state.config.lojas.map((l,i)=>
     `<tr><td>${escapeHtml(l.nome)}</td><td><span class="reg ${l.regiao}">${escapeHtml(l.regiao||'')}</span></td>
       <td><button class="btn danger small" data-rem-loja="${i}" type="button">remover</button></td></tr>`).join('');
-  document.querySelectorAll('[data-rem-loja]').forEach(b=>b.onclick=()=>{ state.config.lojas.splice(+b.dataset.remLoja,1); save(); renderParametros(); });
+  document.querySelectorAll('[data-rem-loja]').forEach(b=>b.onclick=()=>{ state.config.lojas.splice(+b.dataset.remLoja,1); dirtyConfig.add('lojas'); save(); renderParametros(); });
 }
 
 function renderAll(){
@@ -823,7 +829,7 @@ document.getElementById('btn-salvar-params').addEventListener('click', ()=>{
   const ini=document.getElementById('p-inicio').value, fim=document.getElementById('p-fim').value;
   if(!ini||!fim||ini>fim){ toast('Verifique as datas de início e fim.'); return; }
   state.config.metaTotal=meta; state.config.inicio=ini; state.config.fim=fim;
-  save(); document.getElementById('ref-data').min=ini; document.getElementById('ref-data').max=fim;
+  dirtyConfig.add('meta'); dirtyConfig.add('periodo'); save(); document.getElementById('ref-data').min=ini; document.getElementById('ref-data').max=fim;
   document.getElementById('ref-data').value=clampRef(document.getElementById('ref-data').value||iso(new Date()));
   renderParametros(); renderAll(); toast('Parâmetros salvos.');
 });
@@ -832,7 +838,7 @@ document.getElementById('btn-add-feriado').addEventListener('click', ()=>{
   if(!d){ toast('Escolha a data do feriado.'); return; }
   state.config.feriados.push({data:d, desc:desc||'Feriado'});
   document.getElementById('fer-data').value=''; document.getElementById('fer-desc').value='';
-  save(); renderParametros(); renderAll(); toast('Feriado adicionado.');
+  dirtyConfig.add('feriados'); save(); renderParametros(); renderAll(); toast('Feriado adicionado.');
 });
 document.getElementById('btn-add-loja').addEventListener('click', ()=>{
   const nome=document.getElementById('loja-nome').value.trim().toUpperCase();
@@ -841,7 +847,7 @@ document.getElementById('btn-add-loja').addEventListener('click', ()=>{
   if(state.config.lojas.some(l=>l.nome===nome)){ toast('Essa loja já existe.'); return; }
   state.config.lojas.push({nome, regiao:reg||'R1'});
   document.getElementById('loja-nome').value=''; document.getElementById('loja-reg').value='';
-  save(); renderParametros(); renderAll(); toast('Loja adicionada.');
+  dirtyConfig.add('lojas'); save(); renderParametros(); renderAll(); toast('Loja adicionada.');
 });
 document.getElementById('btn-reset').addEventListener('click', ()=>{
   if(!confirm('Restaurar os dados de exemplo? Isso substitui os lançamentos e a configuração atuais.')) return;
@@ -931,17 +937,34 @@ async function getGraphToken(){
   try{ const r=await msalInstance.acquireTokenSilent({scopes:GRAPH_SCOPES,account:msAccount}); return r.accessToken; }
   catch(e){ try{ const r=await msalInstance.acquireTokenPopup({scopes:GRAPH_SCOPES}); return r.accessToken; }catch(e2){ return null; } }
 }
-async function graphGetJson(filePath){
-  const token=await getGraphToken(); if(!token) return null;
-  const base=await spDriveUrl(filePath); if(!base) return null;
-  try{ const r=await fetch(base+':/content',{headers:{Authorization:'Bearer '+token}}); if(!r.ok) return null; return await r.json(); }
-  catch(e){ return null; }
+// GET: busca metadados (para o ETag) + conteúdo JSON. Retorna {ok, data, etag, missing}
+async function graphGetJsonEtag(filePath){
+  const token=await getGraphToken(); if(!token) return {ok:false};
+  const base=await spDriveUrl(filePath); if(!base) return {ok:false};
+  try{
+    const meta=await fetch(base,{headers:{Authorization:'Bearer '+token}});
+    if(meta.status===404) return {ok:true, missing:true, data:null, etag:null};
+    if(!meta.ok) return {ok:false};
+    const mj=await meta.json();
+    const etag = mj.eTag || mj.cTag || meta.headers.get('ETag') || null;
+    const c=await fetch(base+':/content',{headers:{Authorization:'Bearer '+token}});
+    if(!c.ok) return {ok:false};
+    const data=await c.json();
+    return {ok:true, data, etag};
+  }catch(e){ return {ok:false}; }
 }
-async function graphPut(filePath, body){
-  const token=await getGraphToken(); if(!token) return false;
-  const base=await spDriveUrl(filePath); if(!base) return false;
-  try{ const r=await fetch(base+':/content',{method:'PUT',headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'},body}); return r.ok; }
-  catch(e){ return false; }
+// PUT com trava otimista (If-Match). Retorna {ok, status, etag}
+async function graphPutEtag(filePath, body, etag){
+  const token=await getGraphToken(); if(!token) return {ok:false, status:0};
+  const base=await spDriveUrl(filePath); if(!base) return {ok:false, status:0};
+  const headers={Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'};
+  if(etag) headers['If-Match']=etag;
+  try{
+    const r=await fetch(base+':/content',{method:'PUT',headers,body});
+    let newEtag=r.headers.get('ETag');
+    if(r.ok){ try{ const j=await r.json(); newEtag=j.eTag||j.cTag||newEtag; }catch(e){} }
+    return {ok:r.ok, status:r.status, etag:newEtag};
+  }catch(e){ return {ok:false, status:0}; }
 }
 let _pastaOk=false;
 async function ensureFolder(){
@@ -999,30 +1022,140 @@ document.getElementById('btn-ms-login').addEventListener('click', async ()=>{
   }
 });
 
-/* ---------- carregar/gravar dados compartilhados ---------- */
+/* ---------- estado de sincronização / concorrência ---------- */
+let cloudEtag=null, acessoEtag=null;   // ETag da última versão conhecida no SharePoint
+const dirtyLanc=new Set();             // chaves "data|loja" alteradas localmente e ainda não salvas
+const dirtyConfig=new Set();           // seções de parâmetro alteradas: 'meta','periodo','feriados','lojas'
+let salvando=false, pendente=false;
+const clone=o=>JSON.parse(JSON.stringify(o));
+
+function setSyncStatus(txt,cls){ const el=document.getElementById('sync-status'); if(!el) return; el.textContent=txt; el.className='sync-status '+(cls||''); el.style.display=txt?'block':'none'; }
+
+/* aplica MINHAS alterações locais (sujas) sobre uma base recém-baixada do servidor,
+   preservando o que outros usuários gravaram em registros/seções que eu não toquei */
+function aplicarLocalSobre(base){
+  const res={ config: clone(base.config||state.config), lanc: clone(base.lanc||{}) };
+  dirtyLanc.forEach(k=>{ if(state.lanc[k]) res.lanc[k]=clone(state.lanc[k]); });
+  if(dirtyConfig.has('meta'))    res.config.metaTotal=state.config.metaTotal;
+  if(dirtyConfig.has('periodo')){ res.config.inicio=state.config.inicio; res.config.fim=state.config.fim; }
+  if(dirtyConfig.has('feriados')) res.config.feriados=clone(state.config.feriados);
+  if(dirtyConfig.has('lojas'))    res.config.lojas=clone(state.config.lojas);
+  return res;
+}
+
+/* re-render que NÃO reconstrói a grade de lançamento (para não roubar o foco de quem digita) */
+function refreshLancGridPreserveFocus(){
+  const d=document.getElementById('lanc-data').value; if(!d) return;
+  const foco=document.activeElement;
+  document.querySelectorAll('#tbl-lanc tbody tr[data-loja]').forEach(tr=>{
+    const k=d+'|'+tr.dataset.loja; const v=state.lanc[k]||{ct:0,or:0,vq:0,ft:0};
+    tr.querySelectorAll('input[data-f]').forEach(inp=>{ if(inp!==foco) inp.value=v[inp.dataset.f]||0; });
+  });
+  const tr=document.querySelector('#tbl-lanc tbody tr.total-row');
+  if(tr){ tr.children[2].textContent=int(somaLanc('ct',d,d)); tr.children[3].textContent=brl(somaLanc('or',d,d));
+    tr.children[4].textContent=brl(somaLanc('vq',d,d)); tr.children[5].textContent=brl(somaLanc('ft',d,d)); }
+}
+function renderRemoto(){
+  renderPainel(); renderLoja(); renderSemanal(); renderMensal();
+  if(document.getElementById('pane-lancamento').classList.contains('active')) refreshLancGridPreserveFocus();
+  if(document.getElementById('pane-parametros').classList.contains('active')) renderParametros();
+}
+
+/* ---------- carregar dados compartilhados ---------- */
 async function sincronizarNuvem(silencioso){
   if(!msAccount) return;
-  const ac=await graphGetJson(spPath(ACESSO_FILE));
-  if(ac && (ac.emailsAutorizados||ac.emailsComuns)) acesso={emailsAutorizados:ac.emailsAutorizados||[], emailsComuns:ac.emailsComuns||[]};
-  const dados=await graphGetJson(spPath(DADOS_FILE));
-  if(dados && dados.config && dados.lanc){ state=dados; try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){} }
-  initRef(); renderParametros(); renderAll();
+  const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));
+  if(ac.ok && ac.data && (ac.data.emailsAutorizados||ac.data.emailsComuns)){
+    acesso={emailsAutorizados:ac.data.emailsAutorizados||[], emailsComuns:ac.data.emailsComuns||[]}; acessoEtag=ac.etag;
+  }
+  const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
+  if(dd.ok && dd.data && dd.data.config && dd.data.lanc){
+    state = (dirtyLanc.size||dirtyConfig.size) ? aplicarLocalSobre(dd.data) : dd.data;
+    cloudEtag=dd.etag; try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){}
+  } else if(dd.ok && dd.missing){
+    cloudEtag=null; // arquivo ainda não existe → primeiro salvamento cria
+  }
+  initRef(); renderRemoto();
+  setSyncStatus('☁ conectado','ok');
   if(!silencioso) toast('Dados atualizados da nuvem.');
+  startPolling();
 }
+
+/* ---------- gravar dados com trava otimista + mesclagem + retry ---------- */
 let _saveTimer=null;
 function scheduleCloudSave(){
   if(!msAccount || nivelAcesso()==='bloqueado') return;
+  setSyncStatus('⏳ salvando…','saving');
   clearTimeout(_saveTimer);
-  _saveTimer=setTimeout(async ()=>{
-    await ensureFolder();
-    const ok=await graphPut(spPath(DADOS_FILE), new TextEncoder().encode(JSON.stringify(state)));
-    if(ok) toast('Salvo na nuvem ✓');
-  }, 1200);
+  _saveTimer=setTimeout(()=>salvarDados(), 900);
 }
+async function salvarDados(){
+  if(!msAccount || nivelAcesso()==='bloqueado') return;
+  if(salvando){ pendente=true; return; }
+  salvando=true;
+  await ensureFolder();
+  let ok=false, tent=0;
+  while(tent<5 && !ok){
+    tent++;
+    const res=await graphPutEtag(spPath(DADOS_FILE), new TextEncoder().encode(JSON.stringify(state)), cloudEtag);
+    if(res.ok){
+      cloudEtag=res.etag||cloudEtag; dirtyLanc.clear(); dirtyConfig.clear(); ok=true;
+      setSyncStatus('☁ salvo','ok');
+    } else if(res.status===412 || res.status===409){
+      // Conflito: outra pessoa gravou antes. Baixa a versão nova, remescla as minhas mudanças e tenta de novo.
+      setSyncStatus('⟳ mesclando…','saving');
+      const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
+      if(dd.ok && dd.data && dd.data.config && dd.data.lanc){
+        state=aplicarLocalSobre(dd.data); cloudEtag=dd.etag;
+        try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){}
+        renderRemoto();
+      } else break;
+    } else break; // rede/token indisponível
+  }
+  salvando=false;
+  if(!ok) setSyncStatus('⚠ salvo só no aparelho','warn');
+  if(pendente){ pendente=false; salvarDados(); }
+}
+
+/* ---------- polling: traz alterações de outros usuários ---------- */
+let _pollTimer=null;
+function startPolling(){
+  clearInterval(_pollTimer);
+  _pollTimer=setInterval(puxarSeMudou, 15000);
+}
+async function puxarSeMudou(){
+  if(!msAccount || salvando) return;
+  if(dirtyLanc.size || dirtyConfig.size) return;              // não puxa enquanto eu tenho edições pendentes
+  const a=document.activeElement;
+  if(a && a.tagName==='INPUT' && a.type==='number') return;   // não puxa enquanto digito um número
+  const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
+  if(dd.ok && dd.etag && dd.etag!==cloudEtag && dd.data && dd.data.config && dd.data.lanc){
+    state=dd.data; cloudEtag=dd.etag; try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){}
+    renderRemoto(); setSyncStatus('⟳ atualizado agora','ok');
+  }
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) puxarSeMudou(); });
+
+/* ---------- gravar acesso (usuários) com trava otimista ---------- */
 async function saveAcesso(){
   if(!msAccount){ toast('Entre com o Microsoft para gerenciar usuários.'); return; }
   await ensureFolder();
-  await graphPut(spPath(ACESSO_FILE), new TextEncoder().encode(JSON.stringify(acesso)));
+  let ok=false, tent=0;
+  const uniao=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));
+  while(tent<5 && !ok){
+    tent++;
+    const res=await graphPutEtag(spPath(ACESSO_FILE), new TextEncoder().encode(JSON.stringify(acesso)), acessoEtag);
+    if(res.ok){ acessoEtag=res.etag||acessoEtag; ok=true; }
+    else if(res.status===412 || res.status===409){
+      const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));
+      if(ac.ok && ac.data){
+        acesso.emailsAutorizados=uniao(ac.data.emailsAutorizados, acesso.emailsAutorizados);
+        acesso.emailsComuns=uniao(ac.data.emailsComuns, acesso.emailsComuns).filter(e=>!acesso.emailsAutorizados.includes(e));
+        acessoEtag=ac.etag; renderUsuarios();
+      } else break;
+    } else break;
+  }
+  if(!ok) toast('Não foi possível salvar os usuários agora.');
 }
 
 /* ---------- níveis de acesso ---------- */
