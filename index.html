@@ -236,17 +236,19 @@ function loadMsal(){
     <div class="totals-strip" id="strip-funil"></div>
 
     <div class="card" style="margin-top:18px;">
-      <h3>Lojas — Mês Atual <span class="h3-side">ordenado por faturado</span></h3>
+      <h3>Lojas — Mês Atual <span class="h3-side" id="funil-mes-label">funil do mês</span></h3>
+      <div class="totals-strip" id="strip-funil-mes"></div>
       <div class="tablewrap">
         <table class="dt" id="tbl-ranking">
           <thead><tr>
-            <th>Loja</th><th>Região</th><th class="r">Faturado no Mês</th>
-            <th class="r">% do Total</th><th class="r">Meta do Mês</th><th>% Atingido</th>
+            <th>Loja</th><th>Região</th>
+            <th class="r">Contatos</th><th class="r">Orçamento</th><th class="r">Venda Quente</th><th class="r">Perdido</th>
+            <th class="r">Faturado no Mês</th><th class="r">% do Total</th><th class="r">Meta do Mês</th><th>% Atingido</th>
           </tr></thead>
           <tbody></tbody>
         </table>
       </div>
-      <div class="note">A “Meta do Mês” por loja é uma referência simples (meta do mês ÷ nº de lojas) — apenas para visão comparativa, não é meta oficial por loja.</div>
+      <div class="note">Números filtrados pelo mês da data de referência. A “Meta do Mês” por loja é uma referência simples (meta do mês ÷ nº de lojas) — apenas para visão comparativa, não é meta oficial por loja.</div>
     </div>
   </section>
 
@@ -598,25 +600,44 @@ function renderPainel(){
     tbox('Conversão Quente→Fat.', pct(convQF)) +
     tbox('Conversão Total', pct(convTotal), null, {accent:true});
 
-  // RANKING LOJAS (mês)
+  // RANKING + FUNIL DO MÊS (por loja, filtrado pelo mês da data de referência)
   const nLojas = state.config.lojas.length || 1;
   let duMes=0; eachDate(mA,mB,(x)=>{ if(isDiaUtil(x,f)) duMes++; });
   const metaMesLoja = metaDiaria()*duMes/nLojas;
-  const rows = state.config.lojas.map(l=>{
-    const fat = somaLanc('ft', mA, mB, l.nome);
-    return {nome:l.nome, regiao:l.regiao, fat, metaMes:metaMesLoja};
-  });
-  const totalFatMes = rows.reduce((s,x)=>s+x.fat,0);
-  rows.sort((a,b)=>b.fat-a.fat);
+  const rows = state.config.lojas.map(l=>({
+    nome:l.nome, regiao:l.regiao,
+    ct:somaLanc('ct',mA,mB,l.nome), or:somaLanc('or',mA,mB,l.nome),
+    vq:somaLanc('vq',mA,mB,l.nome), pd:somaLanc('pd',mA,mB,l.nome), ft:somaLanc('ft',mA,mB,l.nome),
+    metaMes:metaMesLoja
+  }));
+  const totalFatMes = rows.reduce((s,x)=>s+x.ft,0);
+
+  // funil consolidado do mês (responde à data de referência)
+  const mCt=somaLanc('ct',mA,mB), mOr=somaLanc('or',mA,mB), mVq=somaLanc('vq',mA,mB), mPd=somaLanc('pd',mA,mB);
+  const mTaxaPerda=mOr>0?mPd/mOr:null, mConv=mOr>0?totalFatMes/mOr:null;
+  const flbl=document.getElementById('funil-mes-label'); if(flbl) flbl.textContent=`funil do mês · ${ddmm(D(mA))} a ${ddmm(D(mB))}`;
+  document.getElementById('strip-funil-mes').innerHTML =
+    tbox('Contatos', int(mCt)) +
+    tbox('Orçamento', brl0(mOr), null, {sm:true}) +
+    tbox('Venda Quente', brl0(mVq), null, {sm:true}) +
+    tbox('Perdido', brl0(mPd), `perda: ${pct(mTaxaPerda)}`, {sm:true, accent:true}) +
+    tbox('Faturado', brl0(totalFatMes), null, {sm:true}) +
+    tbox('Conversão (Fat./Orç.)', pct(mConv), null, {accent:true});
+
+  rows.sort((a,b)=>b.ft-a.ft);
   const tb = document.querySelector('#tbl-ranking tbody');
   tb.innerHTML = rows.map(x=>{
-    const share = totalFatMes>0 ? x.fat/totalFatMes : 0;
-    const atg = x.metaMes>0 ? x.fat/x.metaMes : 0;
+    const share = totalFatMes>0 ? x.ft/totalFatMes : 0;
+    const atg = x.metaMes>0 ? x.ft/x.metaMes : 0;
     const pw = Math.min(100, atg*100);
     return `<tr>
       <td>${escapeHtml(x.nome)}</td>
       <td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
-      <td class="num">${brl(x.fat)}</td>
+      <td class="num">${int(x.ct)}</td>
+      <td class="num">${brl(x.or)}</td>
+      <td class="num">${brl(x.vq)}</td>
+      <td class="num">${brl(x.pd)}</td>
+      <td class="num">${brl(x.ft)}</td>
       <td class="num">${pct(share)}</td>
       <td class="num">${brl0(x.metaMes)}</td>
       <td><div class="miniprog"><i style="width:${pw}%"></i><b>${pct(atg)}</b></div></td>
