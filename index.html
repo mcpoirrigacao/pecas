@@ -378,6 +378,7 @@ function loadMsal(){
         <div class="field"><label>Data de Fim</label><input type="date" id="p-fim"></div>
         <div class="field readonly"><label>Dias Úteis no Período</label><input type="text" id="p-diasuteis" disabled></div>
         <div class="field readonly"><label>Meta Diária (dia útil)</label><input type="text" id="p-metadiaria" disabled></div>
+        <div class="field"><label>Limite de alerta de perda (%)</label><input type="number" id="p-limperda" step="1" min="0" max="100"></div>
       </div>
     </div>
 
@@ -485,7 +486,7 @@ function defaultState(){
   const lanc = {};
   SEED_LANC.forEach(x=>{ lanc[x.d+'|'+x.loja] = {ct:x.ct, or:x.or, vq:x.vq, ft:x.ft}; });
   return {
-    config:{ metaTotal:8000000, inicio:'2026-08-01', fim:'2026-12-31',
+    config:{ metaTotal:8000000, inicio:'2026-08-01', fim:'2026-12-31', limitePerda:0.40,
              feriados:SEED_FERIADOS.map(f=>({...f})), lojas:SEED_LOJAS.map(l=>({...l})) },
     lanc
   };
@@ -646,7 +647,7 @@ function renderPainel(){
     tbox('Conversão (Fat./Orç.)', pct(mConv), null, {accent:true});
 
   rows.sort((a,b)=>b.ft-a.ft);
-  const LIMITE_PERDA=0.40; // acima disso, a loja é sinalizada
+  const LIMITE_PERDA=(state.config.limitePerda!=null?state.config.limitePerda:0.40); // configurável em Parâmetros
   const tb = document.querySelector('#tbl-ranking tbody');
   tb.innerHTML = rows.map(x=>{
     const share = totalFatMes>0 ? x.ft/totalFatMes : 0;
@@ -862,6 +863,7 @@ function renderParametros(){
   document.getElementById('p-fim').value = state.config.fim;
   document.getElementById('p-diasuteis').value = diasUteisPeriodo()+' dias';
   document.getElementById('p-metadiaria').value = brl(metaDiaria());
+  document.getElementById('p-limperda').value = Math.round((state.config.limitePerda!=null?state.config.limitePerda:0.40)*100);
 
   document.querySelector('#tbl-feriados tbody').innerHTML = state.config.feriados
     .slice().sort((a,b)=>a.data.localeCompare(b.data)).map((fr)=>{
@@ -909,8 +911,9 @@ document.getElementById('btn-salvar-params').addEventListener('click', ()=>{
   const meta=n(document.getElementById('p-meta').value);
   const ini=document.getElementById('p-inicio').value, fim=document.getElementById('p-fim').value;
   if(!ini||!fim||ini>fim){ toast('Verifique as datas de início e fim.'); return; }
-  state.config.metaTotal=meta; state.config.inicio=ini; state.config.fim=fim;
-  dirtyConfig.add('meta'); dirtyConfig.add('periodo'); save(); document.getElementById('ref-data').min=ini; document.getElementById('ref-data').max=fim;
+  let lp=n(document.getElementById('p-limperda').value)/100; lp=Math.max(0,Math.min(1,lp));
+  state.config.metaTotal=meta; state.config.inicio=ini; state.config.fim=fim; state.config.limitePerda=lp;
+  dirtyConfig.add('meta'); dirtyConfig.add('periodo'); dirtyConfig.add('limperda'); save(); document.getElementById('ref-data').min=ini; document.getElementById('ref-data').max=fim;
   document.getElementById('ref-data').value=clampRef(document.getElementById('ref-data').value||iso(new Date()));
   renderParametros(); renderAll(); toast('Parâmetros salvos.');
 });
@@ -1118,6 +1121,7 @@ function aplicarLocalSobre(base){
   const res={ config: clone(base.config||state.config), lanc: clone(base.lanc||{}) };
   dirtyLanc.forEach(k=>{ if(state.lanc[k]) res.lanc[k]=clone(state.lanc[k]); });
   if(dirtyConfig.has('meta'))    res.config.metaTotal=state.config.metaTotal;
+  if(dirtyConfig.has('limperda')) res.config.limitePerda=state.config.limitePerda;
   if(dirtyConfig.has('periodo')){ res.config.inicio=state.config.inicio; res.config.fim=state.config.fim; }
   if(dirtyConfig.has('feriados')) res.config.feriados=clone(state.config.feriados);
   if(dirtyConfig.has('lojas'))    res.config.lojas=clone(state.config.lojas);
