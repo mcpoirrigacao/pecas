@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAQCAMPO · Acompanhamento de Faturamento</title>
+<script>
+// Carrega MSAL dinamicamente com fallback (mesma abordagem do app de Orçamentos)
+function loadMsal(){
+  return new Promise((res, rej) => {
+    if(window.msal){ res(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.7.1/lib/msal-browser.min.js';
+    s.onload = () => res();
+    s.onerror = () => {
+      const s2 = document.createElement('script');
+      s2.src = 'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js';
+      s2.onload = () => res();
+      s2.onerror = () => rej(new Error('MSAL não carregou'));
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  });
+}
+</script>
+<style>
+  :root{
+    --azul-escuro:#03590f;
+    --azul:#0a7517;
+    --azul-claro:#1f8c33;
+    --areia:#f4efe6;
+    --areia-escura:#e8dfd0;
+    --ferrugem:#c1541c;
+    --verde:#4c7a3f;
+    --texto:#1e2b22;
+    --texto-suave:#5f6e62;
+    --branco:#ffffff;
+    --borda:#d9d0bf;
+    --erro:#a3312a;
+    --raio:6px;
+    --fonte-titulo: 'Georgia', 'Times New Roman', serif;
+    --fonte-corpo: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --fonte-dado: 'Courier New', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:var(--fonte-corpo);
+    background:var(--areia);
+    color:var(--texto);
+    line-height:1.4;
+    -webkit-font-smoothing:antialiased;
+  }
+  header.app-header{
+    background:linear-gradient(135deg,var(--azul-escuro),var(--azul));
+    color:var(--branco);
+    padding:18px 20px 14px;
+    position:sticky;
+    top:0;
+    z-index:50;
+    box-shadow:0 2px 10px rgba(0,0,0,.25);
+  }
+  .brand-row{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+  .brand-mark{font-family:var(--fonte-titulo);font-size:1.5rem;font-weight:700;letter-spacing:.5px;}
+  .brand-sub{font-size:.72rem;text-transform:uppercase;letter-spacing:1.5px;color:#bcdec2;}
+  .ref-box{margin-left:auto;text-align:right;}
+  .ref-box label{display:block;font-size:.6rem;text-transform:uppercase;letter-spacing:1px;color:#bcdec2;margin-bottom:3px;}
+  .ref-box input{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.14);color:#fff;border-radius:4px;padding:5px 8px;font-size:.8rem;font-family:var(--fonte-corpo);}
+  .ref-box input::-webkit-calendar-picker-indicator{filter:invert(1);}
+
+  nav.tabs{display:flex;gap:2px;margin-top:14px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid rgba(255,255,255,.15);}
+  nav.tabs::-webkit-scrollbar{display:none;}
+  nav.tabs button{
+    flex:0 0 auto;background:transparent;border:none;color:#a9cfb2;padding:9px 14px;
+    font-size:.82rem;font-weight:600;letter-spacing:.2px;cursor:pointer;
+    border-bottom:3px solid transparent;white-space:nowrap;transition:color .15s, border-color .15s;
+  }
+  nav.tabs button.active{color:#ffffff;border-bottom:3px solid var(--ferrugem);}
+  nav.tabs button:hover{color:#ffffff;}
+
+  main{max-width:1100px;margin:0 auto;padding:18px 14px 90px;}
+  section.pane{display:none;animation:fade .18s ease;}
+  section.pane.active{display:block;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+
+  h2.pane-title{font-family:var(--fonte-titulo);font-size:1.35rem;margin:4px 0 4px;color:var(--azul-escuro);}
+  p.pane-desc{color:var(--texto-suave);font-size:.86rem;margin:0 0 18px;}
+
+  .card{background:var(--branco);border:1px solid var(--borda);border-radius:var(--raio);padding:16px;margin-bottom:16px;}
+  .card h3{
+    margin:0 0 12px;font-size:.78rem;text-transform:uppercase;letter-spacing:1px;color:var(--azul-claro);
+    border-bottom:1px solid var(--areia-escura);padding-bottom:8px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+  }
+  .card h3 .h3-side{font-size:.7rem;color:var(--texto-suave);text-transform:none;letter-spacing:0;font-weight:400;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;}
+  .field{display:flex;flex-direction:column;gap:4px;}
+  .field label{font-size:.74rem;color:var(--texto-suave);font-weight:600;}
+  .field input[type=text],.field input[type=number],.field input[type=date],.field textarea{
+    border:1px solid var(--borda);border-radius:4px;padding:8px 9px;font-size:.92rem;
+    font-family:var(--fonte-corpo);background:#fffdf9;color:var(--texto);
+  }
+  .field input:focus,.field textarea:focus{outline:2px solid var(--azul-claro);outline-offset:1px;}
+  .field.readonly input{background:var(--areia-escura);color:var(--texto-suave);}
+
+  .totals-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:4px;margin-bottom:16px;}
+  .total-box{background:var(--azul-escuro);color:#fff;border-radius:6px;padding:12px 14px;}
+  .total-box .label{font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#a9cfb2;}
+  .total-box .value{font-family:var(--fonte-dado);font-size:1.15rem;font-weight:700;margin-top:3px;}
+  .total-box .value.sm{font-size:.98rem;}
+  .total-box.accent{background:var(--ferrugem);}
+  .total-box.accent .label{color:#f6dcc9;}
+  .total-box .sub{font-size:.64rem;color:#a9cfb2;margin-top:4px;font-family:var(--fonte-corpo);}
+  .total-box.accent .sub{color:#f6dcc9;}
+
+  .bar{height:7px;background:var(--areia-escura);border-radius:4px;overflow:hidden;margin-top:7px;}
+  .bar > span{display:block;height:100%;background:var(--azul-claro);border-radius:4px;}
+  .bar.rust > span{background:var(--ferrugem);}
+
+  .block-title{
+    font-family:var(--fonte-titulo);color:var(--azul-escuro);font-size:1.05rem;
+    margin:22px 0 8px;padding-bottom:4px;border-bottom:2px solid var(--areia-escura);
+  }
+
+  table.dt{width:100%;border-collapse:collapse;font-size:.82rem;}
+  table.dt th{
+    text-align:left;background:var(--azul-escuro);color:#fff;padding:8px 8px;
+    font-size:.66rem;text-transform:uppercase;letter-spacing:.4px;position:sticky;top:0;
+  }
+  table.dt th.r,table.dt td.r{text-align:right;}
+  table.dt td{padding:7px 8px;border-bottom:1px solid var(--areia-escura);vertical-align:middle;}
+  table.dt tr:hover td{background:#fbf7ef;}
+  table.dt td.num{font-family:var(--fonte-dado);text-align:right;}
+  table.dt tr.total-row td{background:var(--areia-escura);font-weight:700;color:var(--azul-escuro);border-top:2px solid var(--azul-escuro);}
+  table.dt input[type=number]{width:100%;min-width:78px;padding:5px 6px;border:1px solid var(--borda);border-radius:4px;text-align:right;font-family:var(--fonte-dado);font-size:.82rem;background:#fffdf9;}
+  table.dt input[type=number]:focus{outline:2px solid var(--azul-claro);outline-offset:0;}
+  .tablewrap{overflow-x:auto;border:1px solid var(--borda);border-radius:6px;}
+
+  .reg{display:inline-block;font-size:.62rem;padding:2px 6px;border-radius:3px;font-weight:700;letter-spacing:.3px;}
+  .reg.R1{background:#e4f1e6;color:var(--azul-claro);}
+  .reg.R2{background:#f3e6de;color:var(--ferrugem);}
+
+  .miniprog{position:relative;height:16px;background:var(--areia-escura);border-radius:3px;min-width:90px;overflow:hidden;}
+  .miniprog > i{position:absolute;left:0;top:0;bottom:0;background:var(--azul-claro);opacity:.85;}
+  .miniprog > b{position:absolute;left:6px;top:0;bottom:0;display:flex;align-items:center;font-size:.68rem;font-family:var(--fonte-dado);color:var(--texto);font-weight:700;}
+
+  .btn{border:none;border-radius:5px;padding:9px 16px;font-size:.85rem;font-weight:700;cursor:pointer;letter-spacing:.2px;transition:transform .08s, filter .12s;}
+  .btn:active{transform:scale(.97);}
+  .btn.primary{background:var(--ferrugem);color:#fff;}
+  .btn.primary:hover{filter:brightness(1.08);}
+  .btn.ghost{background:transparent;color:var(--azul);border:1px solid var(--azul-claro);}
+  .btn.ghost:hover{background:#eef6ef;}
+  .btn.danger{background:transparent;color:var(--erro);border:1px solid var(--erro);}
+  .btn.danger:hover{background:#fbeceb;}
+  .btn.small{padding:5px 10px;font-size:.72rem;}
+
+  .note{font-size:.76rem;color:var(--texto-suave);background:#f3f1ea;border-left:3px solid var(--azul-claro);padding:8px 10px;border-radius:0 4px 4px 0;margin:10px 0;}
+  .day-nav{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+  .day-nav .util{font-size:.72rem;font-weight:700;padding:3px 9px;border-radius:12px;}
+  .util.sim{background:#e4f1e6;color:var(--azul-claro);}
+  .util.nao{background:#f3e6de;color:var(--ferrugem);}
+
+  body:not(.is-admin) .somente-admin{display:none !important;}
+  .ms-btn{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;font-size:.75rem;padding:6px 12px;cursor:pointer;font-weight:600;}
+  .ms-btn:hover{background:rgba(255,255,255,.28);}
+  .ms-info{display:none;font-size:.68rem;color:#a9cfb2;margin-top:3px;text-align:right;word-break:break-all;}
+  .overlay{display:none;position:fixed;inset:0;background:var(--azul-escuro);z-index:1000;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;}
+  .overlay .box{background:#fff;border-radius:10px;padding:40px 32px;max-width:420px;width:100%;}
+  .overlay .box h2{font-family:var(--fonte-titulo);color:var(--azul-escuro);margin:0 0 10px;}
+  .overlay .box p{color:var(--texto-suave);font-size:.9rem;margin:0 0 22px;}
+  .overlay .emoji{font-size:3rem;margin-bottom:16px;}
+
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--azul-escuro);color:#fff;padding:10px 18px;border-radius:20px;font-size:.82rem;opacity:0;transition:opacity .25s, transform .25s;pointer-events:none;z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.3);}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  .hint-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  @media (max-width:600px){
+    .grid{grid-template-columns:1fr 1fr;}
+    .ref-box{margin-left:0;text-align:left;width:100%;margin-top:8px;}
+  }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand-row">
+    <span class="brand-mark">MAQCAMPO Faturamento</span>
+    <span class="brand-sub">Acompanhamento de Vendas — Todas as Lojas</span>
+    <div style="margin-left:auto;display:flex;gap:14px;align-items:flex-start;">
+      <div class="ref-box" style="margin-left:0;">
+        <label for="ref-data">Data de referência</label>
+        <input type="date" id="ref-data">
+      </div>
+      <div style="text-align:right;">
+        <button id="btn-ms-login" class="ms-btn" type="button"><span id="ms-login-label">⏳ Inicializando...</span></button>
+        <div id="ms-user-info" class="ms-info"></div>
+      </div>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="painel" class="active">Painel</button>
+    <button data-tab="lancamento">Lançamento Diário</button>
+    <button data-tab="loja">Resumo por Loja</button>
+    <button data-tab="semanal">Resumo Semanal</button>
+    <button data-tab="mensal">Resumo Mensal</button>
+    <button data-tab="parametros">⚙ Parâmetros</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============== PAINEL ============== -->
+  <section class="pane active" id="pane-painel">
+    <h2 class="pane-title">Painel da Empresa</h2>
+    <p class="pane-desc" id="painel-desc">Visão consolidada de metas × realizado — todas as lojas.</p>
+
+    <div class="block-title">Hoje — Faturado</div>
+    <div class="totals-strip" id="strip-hoje"></div>
+
+    <div class="block-title">Semana Atual</div>
+    <div class="totals-strip" id="strip-semana"></div>
+
+    <div class="block-title">Mês Atual</div>
+    <div class="totals-strip" id="strip-mes"></div>
+
+    <div class="block-title">Período Total (Agosto a Dezembro)</div>
+    <div class="totals-strip" id="strip-periodo"></div>
+
+    <div class="block-title">Funil de Prospecção (acumulado do período)</div>
+    <div class="totals-strip" id="strip-funil"></div>
+
+    <div class="card" style="margin-top:18px;">
+      <h3>Lojas — Mês Atual <span class="h3-side">ordenado por faturado</span></h3>
+      <div class="tablewrap">
+        <table class="dt" id="tbl-ranking">
+          <thead><tr>
+            <th>Loja</th><th>Região</th><th class="r">Faturado no Mês</th>
+            <th class="r">% do Total</th><th class="r">Meta do Mês</th><th>% Atingido</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="note">A “Meta do Mês” por loja é uma referência simples (meta do mês ÷ nº de lojas) — apenas para visão comparativa, não é meta oficial por loja.</div>
+    </div>
+  </section>
+
+  <!-- ============== LANÇAMENTO DIÁRIO ============== -->
+  <section class="pane" id="pane-lancamento">
+    <h2 class="pane-title">Lançamento Diário por Loja</h2>
+    <p class="pane-desc">Selecione o dia e preencha, por loja: Contatos, Orçamento, Venda Quente e Faturado. Os valores alimentam todos os resumos automaticamente.</p>
+
+    <div class="card">
+      <div class="day-nav">
+        <button class="btn ghost small" id="dia-prev" type="button">◀ Dia anterior</button>
+        <div class="field" style="margin:0;"><input type="date" id="lanc-data" style="min-width:160px;"></div>
+        <button class="btn ghost small" id="dia-next" type="button">Próximo dia ▶</button>
+        <span class="util" id="lanc-util">—</span>
+        <span style="font-size:.78rem;color:var(--texto-suave);" id="lanc-semana"></span>
+      </div>
+      <div class="tablewrap">
+        <table class="dt" id="tbl-lanc">
+          <thead><tr>
+            <th>Loja</th><th>Região</th>
+            <th class="r">Contatos</th><th class="r">Orçamento (R$)</th>
+            <th class="r">Venda Quente (R$)</th><th class="r">Faturado (R$)</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="hint-row">
+      <button class="btn ghost small" id="btn-export-csv" type="button">↓ Exportar CSV (todos os lançamentos)</button>
+      <button class="btn ghost small" id="btn-export-json" type="button">↓ Exportar dados (JSON)</button>
+      <label class="btn ghost small" style="cursor:pointer;margin:0;">↑ Importar dados (JSON)
+        <input type="file" id="inp-import-json" accept=".json" style="display:none;">
+      </label>
+    </div>
+  </section>
+
+  <!-- ============== RESUMO POR LOJA ============== -->
+  <section class="pane" id="pane-loja">
+    <h2 class="pane-title">Resumo por Loja</h2>
+    <p class="pane-desc" id="loja-desc">Mês atual e acumulado do período por loja.</p>
+
+    <div class="block-title">Mês Atual</div>
+    <div class="tablewrap">
+      <table class="dt" id="tbl-loja-mes">
+        <thead><tr>
+          <th>Loja</th><th>Região</th><th class="r">Contatos</th><th class="r">Orçamento</th>
+          <th class="r">Venda Quente</th><th class="r">Faturado</th><th class="r">% do Faturado</th><th class="r">% da Meta</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="block-title">Acumulado do Período (Agosto a Dezembro)</div>
+    <div class="tablewrap">
+      <table class="dt" id="tbl-loja-periodo">
+        <thead><tr>
+          <th>Loja</th><th>Região</th><th class="r">Contatos</th><th class="r">Orçamento</th>
+          <th class="r">Venda Quente</th><th class="r">Faturado</th><th class="r">% do Faturado</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== RESUMO SEMANAL ============== -->
+  <section class="pane" id="pane-semanal">
+    <h2 class="pane-title">Resumo Semanal</h2>
+    <p class="pane-desc">Meta × realizado por semana (faturado — todas as lojas).</p>
+    <div class="tablewrap">
+      <table class="dt" id="tbl-semanal">
+        <thead><tr>
+          <th>Semana</th><th>Período</th><th class="r">Meta da Semana</th>
+          <th class="r">Realizado</th><th class="r">Diferença</th><th class="r">% Atingido</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== RESUMO MENSAL ============== -->
+  <section class="pane" id="pane-mensal">
+    <h2 class="pane-title">Resumo Mensal</h2>
+    <p class="pane-desc">Meta × realizado por mês, com dias úteis restantes e a meta diária necessária para bater a meta.</p>
+    <div class="tablewrap">
+      <table class="dt" id="tbl-mensal">
+        <thead><tr>
+          <th>Mês</th><th class="r">Meta</th><th class="r">Realizado</th><th class="r">Diferença</th>
+          <th class="r">% Atingido</th><th class="r">Dias Úteis Rest.</th><th class="r">Meta Diária Nec.</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== PARÂMETROS ============== -->
+  <section class="pane" id="pane-parametros">
+    <h2 class="pane-title">⚙ Parâmetros do Sistema</h2>
+    <p class="pane-desc">Configuração da meta, período, feriados e lojas. Alterações aqui recalculam todo o app.</p>
+
+    <div class="card">
+      <h3>Configuração da Meta</h3>
+      <div class="grid" style="max-width:640px;">
+        <div class="field"><label>Meta Total do Período (R$)</label><input type="number" id="p-meta" step="1000"></div>
+        <div class="field"><label>Data de Início</label><input type="date" id="p-inicio"></div>
+        <div class="field"><label>Data de Fim</label><input type="date" id="p-fim"></div>
+        <div class="field readonly"><label>Dias Úteis no Período</label><input type="text" id="p-diasuteis" disabled></div>
+        <div class="field readonly"><label>Meta Diária (dia útil)</label><input type="text" id="p-metadiaria" disabled></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Feriados / Dias Sem Expediente</h3>
+      <div class="tablewrap" style="margin-bottom:10px;">
+        <table class="dt" id="tbl-feriados">
+          <thead><tr><th>Data</th><th>Descrição</th><th style="width:70px;"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="field" style="margin:0;"><label>Data</label><input type="date" id="fer-data"></div>
+        <div class="field" style="margin:0;flex:1;min-width:180px;"><label>Descrição</label><input type="text" id="fer-desc" placeholder="ex: Natal"></div>
+        <button class="btn primary small" id="btn-add-feriado" type="button">+ Adicionar feriado</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Lojas e Regiões</h3>
+      <div class="tablewrap" style="margin-bottom:10px;">
+        <table class="dt" id="tbl-lojas">
+          <thead><tr><th>Loja</th><th>Região</th><th style="width:70px;"></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="field" style="margin:0;flex:1;min-width:160px;"><label>Loja</label><input type="text" id="loja-nome" placeholder="ex: PALMAS"></div>
+        <div class="field" style="margin:0;"><label>Região</label><input type="text" id="loja-reg" placeholder="ex: R2" style="width:110px;"></div>
+        <button class="btn primary small" id="btn-add-loja" type="button">+ Adicionar loja</button>
+      </div>
+      <div class="note">Remover uma loja não apaga os lançamentos já feitos para ela; apenas deixa de exibi-la nas telas.</div>
+    </div>
+
+    <div class="card somente-admin">
+      <h3>Usuários &amp; Acesso <span class="h3-side">login Microsoft</span></h3>
+      <p class="pane-desc" style="margin-bottom:6px;">Administradores editam parâmetros e cadastram usuários. Usuários comuns lançam faturamento e veem os painéis, mas não editam parâmetros. Apenas e-mails cadastrados conseguem entrar.</p>
+
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--texto-suave);font-weight:700;margin:12px 0 6px;">Administradores</div>
+      <div id="lista-admins"></div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+        <input type="text" id="inp-novo-admin" placeholder="email@empresa.com" style="flex:1;min-width:200px;border:1px solid var(--borda);border-radius:4px;padding:8px 10px;font-size:.88rem;background:#fffdf9;">
+        <button class="btn primary small" id="btn-add-admin" type="button">+ Admin</button>
+      </div>
+
+      <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--texto-suave);font-weight:700;margin:16px 0 6px;">Usuários comuns</div>
+      <div id="lista-comuns"></div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+        <input type="text" id="inp-novo-comum" placeholder="email@empresa.com" style="flex:1;min-width:200px;border:1px solid var(--borda);border-radius:4px;padding:8px 10px;font-size:.88rem;background:#fffdf9;">
+        <button class="btn ghost small" id="btn-add-comum" type="button">+ Usuário</button>
+      </div>
+      <div class="note" style="margin-top:10px;">E-mail logado agora: <strong id="email-logado">—</strong> · dados compartilhados em <strong id="sp-alvo">SharePoint › Faturamento</strong></div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn primary" id="btn-salvar-params" type="button">Salvar Parâmetros</button>
+      <button class="btn ghost" id="btn-sync" type="button">⟳ Atualizar da nuvem</button>
+      <button class="btn danger" id="btn-reset" type="button">Restaurar dados de exemplo</button>
+    </div>
+  </section>
+
+</main>
+
+<div class="overlay" id="overlay-login">
+  <div class="box">
+    <div class="emoji">🔐</div>
+    <h2>MAQCAMPO Faturamento</h2>
+    <p>Faça login com sua conta Microsoft para acessar o acompanhamento.</p>
+    <button onclick="document.getElementById('btn-ms-login').click()" class="btn primary" style="width:100%;font-size:.95rem;padding:12px;" type="button">🔑 Entrar com Microsoft</button>
+  </div>
+</div>
+
+<div class="overlay" id="overlay-negado">
+  <div class="box">
+    <div class="emoji">🔒</div>
+    <h2>Acesso Restrito</h2>
+    <p>Seu e-mail não está cadastrado para usar este sistema. Peça a um administrador para liberar seu acesso.</p>
+    <div id="overlay-email-info" style="background:var(--areia);border-radius:6px;padding:10px 14px;font-size:.82rem;color:var(--texto-suave);margin-bottom:20px;word-break:break-all;"></div>
+    <button onclick="document.getElementById('btn-ms-login').click()" class="btn ghost" style="width:100%;" type="button">Entrar com outra conta</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+   DADOS-SEMENTE — extraídos da planilha "Acompanhamento_Faturamento_Lojas"
+   ========================================================================= */
+const SEED_LANC = [{"d":"2026-08-01","loja":"BRASILIA","ct":1,"or":0,"vq":0,"ft":0},{"d":"2026-08-01","loja":"BALSAS","ct":8,"or":880892.97,"vq":0,"ft":249.4},{"d":"2026-08-01","loja":"PALMAS","ct":7,"or":110461,"vq":0,"ft":9214.42},{"d":"2026-08-01","loja":"PARAGOMINAS","ct":6,"or":34843.69,"vq":0,"ft":0},{"d":"2026-08-01","loja":"IRRIGAFAZ","ct":0,"or":9058.5,"vq":0,"ft":0},{"d":"2026-08-03","loja":"BRASILIA","ct":2,"or":0,"vq":0,"ft":0},{"d":"2026-08-03","loja":"CRISTALINA","ct":1,"or":20294.38,"vq":0,"ft":0},{"d":"2026-08-03","loja":"PARACATU","ct":1,"or":0,"vq":0,"ft":0},{"d":"2026-08-03","loja":"NOVA CRIXAS","ct":1,"or":94164.56,"vq":0,"ft":0},{"d":"2026-08-03","loja":"FORMOSA","ct":1,"or":30802.73,"vq":0,"ft":0},{"d":"2026-08-04","loja":"BRASILIA","ct":1,"or":0,"vq":0,"ft":0},{"d":"2026-08-04","loja":"NOVA CRIXAS","ct":1,"or":195,"vq":0,"ft":0},{"d":"2026-08-05","loja":"BRASILIA","ct":2,"or":16860.33,"vq":26816.8,"ft":0},{"d":"2026-08-05","loja":"PARACATU","ct":1,"or":0,"vq":0,"ft":0},{"d":"2026-08-05","loja":"NOVA CRIXAS","ct":2,"or":0,"vq":856.8,"ft":16532.37},{"d":"2026-08-05","loja":"BALSAS","ct":9,"or":9884.24,"vq":285318.56,"ft":737.79},{"d":"2026-08-05","loja":"PALMAS","ct":7,"or":0,"vq":21790,"ft":0},{"d":"2026-08-05","loja":"PARAGOMINAS","ct":3,"or":0,"vq":8000,"ft":0},{"d":"2026-08-06","loja":"BRASILIA","ct":1,"or":0,"vq":0,"ft":26816.8},{"d":"2026-08-06","loja":"CRISTALINA","ct":2,"or":1750,"vq":0,"ft":0},{"d":"2026-08-06","loja":"PARACATU","ct":1,"or":2530,"vq":0,"ft":0},{"d":"2026-08-06","loja":"NOVA CRIXAS","ct":1,"or":5587.91,"vq":0,"ft":0},{"d":"2026-08-06","loja":"BALSAS","ct":6,"or":10914.14,"vq":4658.5,"ft":1218},{"d":"2026-08-06","loja":"PALMAS","ct":4,"or":0,"vq":0,"ft":0},{"d":"2026-08-06","loja":"PARAGOMINAS","ct":4,"or":3859.31,"vq":1000,"ft":0},{"d":"2026-08-06","loja":"IRRIGAFAZ","ct":0,"or":5816.25,"vq":516.35,"ft":0},{"d":"2026-08-07","loja":"BRASILIA","ct":1,"or":0,"vq":0,"ft":0},{"d":"2026-08-07","loja":"CRISTALINA","ct":2,"or":191026.36,"vq":0,"ft":0},{"d":"2026-08-07","loja":"PARACATU","ct":2,"or":14922.04,"vq":0,"ft":0},{"d":"2026-08-07","loja":"BALSAS","ct":7,"or":17735.94,"vq":0,"ft":8075.71},{"d":"2026-08-07","loja":"PALMAS","ct":5,"or":138014.67,"vq":0,"ft":0},{"d":"2026-08-07","loja":"IRRIGAFAZ","ct":0,"or":7818.7,"vq":0,"ft":516.33},{"d":"2026-08-10","loja":"BRASILIA","ct":1,"or":0,"vq":0,"ft":0},{"d":"2026-08-10","loja":"CRISTALINA","ct":2,"or":0,"vq":0,"ft":0},{"d":"2026-08-10","loja":"PARACATU","ct":1,"or":242,"vq":0,"ft":0},{"d":"2026-08-10","loja":"NOVA CRIXAS","ct":1,"or":0,"vq":195,"ft":0},{"d":"2026-08-10","loja":"BALSAS","ct":20,"or":203499.87,"vq":0,"ft":333.67},{"d":"2026-08-10","loja":"PALMAS","ct":9,"or":2560.72,"vq":0,"ft":2560.72},{"d":"2026-08-10","loja":"PARAGOMINAS","ct":7,"or":38400,"vq":3000,"ft":0},{"d":"2026-08-10","loja":"IRRIGAFAZ","ct":0,"or":5912,"vq":5912,"ft":0},{"d":"2026-08-11","loja":"CRISTALINA","ct":1,"or":6653.8,"vq":0,"ft":0},{"d":"2026-08-11","loja":"PARACATU","ct":2,"or":4128,"vq":0,"ft":0},{"d":"2026-08-11","loja":"NOVA CRIXAS","ct":1,"or":0,"vq":188,"ft":0},{"d":"2026-08-11","loja":"BALSAS","ct":26,"or":13845.32,"vq":0,"ft":3327.01},{"d":"2026-08-11","loja":"PALMAS","ct":6,"or":329420.52,"vq":4672,"ft":0},{"d":"2026-08-11","loja":"PARAGOMINAS","ct":6,"or":186302,"vq":0,"ft":0},{"d":"2026-08-12","loja":"BRASILIA","ct":1,"or":0,"vq":4232.42,"ft":0},{"d":"2026-08-12","loja":"CRISTALINA","ct":2,"or":0,"vq":6653.8,"ft":0},{"d":"2026-08-12","loja":"PARACATU","ct":2,"or":32174.92,"vq":0,"ft":0},{"d":"2026-08-12","loja":"NOVA CRIXAS","ct":1,"or":6270,"vq":0,"ft":856.8},{"d":"2026-08-12","loja":"BALSAS","ct":15,"or":23356.28,"vq":0,"ft":1263.97},{"d":"2026-08-12","loja":"PALMAS","ct":7,"or":0,"vq":0,"ft":0},{"d":"2026-08-12","loja":"PARAGOMINAS","ct":6,"or":1090,"vq":0,"ft":0}];
+
+const SEED_FERIADOS = [
+  {data:'2026-09-07', desc:'Independência do Brasil'},
+  {data:'2026-10-12', desc:'N. Sra. Aparecida'},
+  {data:'2026-11-02', desc:'Finados'},
+  {data:'2026-11-15', desc:'Proclamação da República'},
+  {data:'2026-12-25', desc:'Natal'},
+];
+const SEED_LOJAS = [
+  {nome:'BRASILIA',regiao:'R1'},{nome:'CRISTALINA',regiao:'R1'},{nome:'PARACATU',regiao:'R1'},
+  {nome:'NOVA CRIXAS',regiao:'R1'},{nome:'FORMOSA',regiao:'R1'},{nome:'BALSAS',regiao:'R2'},
+  {nome:'PALMAS',regiao:'R2'},{nome:'PARAGOMINAS',regiao:'R2'},{nome:'IRRIGAFAZ',regiao:'R2'},
+];
+
+function defaultState(){
+  const lanc = {};
+  SEED_LANC.forEach(x=>{ lanc[x.d+'|'+x.loja] = {ct:x.ct, or:x.or, vq:x.vq, ft:x.ft}; });
+  return {
+    config:{ metaTotal:8000000, inicio:'2026-08-01', fim:'2026-12-31',
+             feriados:SEED_FERIADOS.map(f=>({...f})), lojas:SEED_LOJAS.map(l=>({...l})) },
+    lanc
+  };
+}
+
+const STORE_KEY = 'maqcampo-faturamento-v1';
+let state = load();
+
+function load(){
+  try{ const raw = localStorage.getItem(STORE_KEY); if(raw){ const s=JSON.parse(raw); if(s&&s.config&&s.lanc) return s; } }catch(e){}
+  return defaultState();
+}
+function save(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){} if(typeof scheduleCloudSave==='function') scheduleCloudSave(); }
+
+/* ---------- helpers ---------- */
+function n(v){ const x=Number(v); return isFinite(x)?x:0; }
+function brl(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function brl0(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:0,maximumFractionDigits:0}); }
+function pct(v){ if(v===null||!isFinite(v)) return '—'; return (v*100).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%'; }
+function int(v){ return (v||0).toLocaleString('pt-BR'); }
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toast._h); toast._h=setTimeout(()=>t.classList.remove('show'),2100); }
+function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+
+/* ---------- datas ---------- */
+function D(iso){ const [y,m,d]=iso.split('-').map(Number); return new Date(y, m-1, d); }
+function iso(dt){ const y=dt.getFullYear(), m=String(dt.getMonth()+1).padStart(2,'0'), d=String(dt.getDate()).padStart(2,'0'); return `${y}-${m}-${d}`; }
+function addDays(dt,k){ return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()+k); }
+function ddmm(dt){ return String(dt.getDate()).padStart(2,'0')+'/'+String(dt.getMonth()+1).padStart(2,'0'); }
+function mondayIndex(dt){ return (dt.getDay()+6)%7; } // 0=Seg ... 6=Dom
+function weeknum2(dt){ // equivalente a WEEKNUM(data,2) do Excel
+  const jan1=new Date(dt.getFullYear(),0,1);
+  const firstStart=addDays(jan1, -mondayIndex(jan1));
+  const diff=Math.round((new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()) - firstStart)/86400000);
+  return Math.floor(diff/7)+1;
+}
+const DIAS_SEM=['Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado','Domingo'];
+
+function feriadoSet(){ return new Set(state.config.feriados.map(f=>f.data)); }
+function isDiaUtil(iso_, fset){ const dt=D(iso_); const mi=mondayIndex(dt); return mi<5 && !(fset||feriadoSet()).has(iso_); }
+function metaDiaria(){ const du=diasUteisPeriodo(); return du>0 ? state.config.metaTotal/du : 0; }
+function eachDate(fromISO,toISO,cb){ let dt=D(fromISO); const end=D(toISO); while(dt<=end){ cb(iso(dt),dt); dt=addDays(dt,1); } }
+function diasUteisPeriodo(){ const f=feriadoSet(); let c=0; eachDate(state.config.inicio,state.config.fim,(s)=>{ if(isDiaUtil(s,f)) c++; }); return c; }
+function metaRange(aISO,bISO){ const f=feriadoSet(), md=metaDiaria(); let s=0; eachDate(aISO,bISO,(x)=>{ if(isDiaUtil(x,f)) s+=md; }); return s; }
+function metaDoDia(iso_){ const f=feriadoSet(); return isDiaUtil(iso_,f)?metaDiaria():0; }
+
+/* soma sobre lançamentos: campo 'ct'|'or'|'vq'|'ft', intervalo de datas [a,b] e loja opcional */
+function somaLanc(campo, aISO, bISO, loja){
+  let s=0;
+  for(const k in state.lanc){
+    const [d, lj] = k.split('|');
+    if(aISO && d<aISO) continue;
+    if(bISO && d>bISO) continue;
+    if(loja && lj!==loja) continue;
+    s += n(state.lanc[k][campo]);
+  }
+  return s;
+}
+function refDate(){ return document.getElementById('ref-data').value || clampRef(iso(new Date())); }
+function clampRef(x){ if(x<state.config.inicio) return state.config.inicio; if(x>state.config.fim) return state.config.fim; return x; }
+function monthBounds(iso_){ const dt=D(iso_); const first=new Date(dt.getFullYear(),dt.getMonth(),1); const last=new Date(dt.getFullYear(),dt.getMonth()+1,0); return [iso(first),iso(last)]; }
+function weekBounds(iso_){ const dt=D(iso_); const mon=addDays(dt,-mondayIndex(dt)); const sun=addDays(mon,6); return [iso(mon),iso(sun)]; }
+
+/* =========================================================================
+   RENDERIZAÇÃO
+   ========================================================================= */
+function tbox(label, value, sub, opts){
+  opts=opts||{};
+  const cls = 'total-box'+(opts.accent?' accent':'');
+  let bar='';
+  if(opts.barPct!=null){ const p=Math.max(0,Math.min(100, opts.barPct)); bar=`<div class="bar ${opts.accent?'rust':''}"><span style="width:${p}%"></span></div>`; }
+  return `<div class="${cls}"><div class="label">${label}</div><div class="value ${opts.sm?'sm':''}">${value}</div>${sub?`<div class="sub">${sub}</div>`:''}${bar}</div>`;
+}
+
+function renderPainel(){
+  const r = refDate();
+  document.getElementById('painel-desc').textContent =
+    `Referência: ${ddmm(D(r))}/${D(r).getFullYear()} · Meta total do período: ${brl0(state.config.metaTotal)}`;
+
+  // HOJE
+  const metaH=metaDoDia(r), realH=somaLanc('ft',r,r), faltaH=Math.max(metaH-realH,0), pctH=metaH>0?realH/metaH:null;
+  document.getElementById('strip-hoje').innerHTML =
+    tbox('Meta do Dia', brl(metaH)) +
+    tbox('Faturado Hoje', brl(realH), null, {barPct:pctH!=null?pctH*100:0}) +
+    tbox('Falta Hoje', brl(faltaH), null, {accent:true}) +
+    tbox('% Atingido', pct(pctH));
+
+  // SEMANA
+  const [wa,wb]=weekBounds(r);
+  const wA=wa<state.config.inicio?state.config.inicio:wa, wB=wb>state.config.fim?state.config.fim:wb;
+  const metaW=metaRange(wA,wB), realW=somaLanc('ft',wA,wB), faltaW=Math.max(metaW-realW,0), pctW=metaW>0?realW/metaW:null;
+  document.getElementById('strip-semana').innerHTML =
+    tbox('Meta da Semana', brl(metaW), `${ddmm(D(wA))} a ${ddmm(D(wB))}`) +
+    tbox('Realizado', brl(realW), null, {barPct:pctW!=null?pctW*100:0}) +
+    tbox('Falta', brl(faltaW), null, {accent:true}) +
+    tbox('% Atingido', pct(pctW));
+
+  // MÊS
+  const [ma,mb]=monthBounds(r);
+  const mA=ma<state.config.inicio?state.config.inicio:ma, mB=mb>state.config.fim?state.config.fim:mb;
+  const metaM=metaRange(mA,mB), realM=somaLanc('ft',mA,mB), faltaM=Math.max(metaM-realM,0), pctM=metaM>0?realM/metaM:null;
+  // dias úteis restantes no mês (após a referência)
+  const f=feriadoSet(); let duRest=0; eachDate(iso(addDays(D(r),1)), mB, (x)=>{ if(isDiaUtil(x,f)) duRest++; });
+  const metaDiaNec = duRest>0 ? faltaM/duRest : 0;
+  document.getElementById('strip-mes').innerHTML =
+    tbox('Meta do Mês', brl0(metaM)) +
+    tbox('Realizado', brl(realM), null, {barPct:pctM!=null?pctM*100:0}) +
+    tbox('Falta', brl(faltaM), null, {accent:true}) +
+    tbox('% Atingido', pct(pctM)) +
+    tbox('Meta Diária p/ Fechar', brl0(metaDiaNec), `${duRest} dia(s) útil(eis) restante(s)`, {sm:true});
+
+  // PERÍODO
+  const metaP=state.config.metaTotal, realP=somaLanc('ft'), faltaP=Math.max(metaP-realP,0), pctP=metaP>0?realP/metaP:null;
+  document.getElementById('strip-periodo').innerHTML =
+    tbox('Meta Total', brl0(metaP)) +
+    tbox('Realizado', brl(realP), null, {barPct:pctP!=null?pctP*100:0}) +
+    tbox('Falta para a Meta', brl0(faltaP), null, {accent:true}) +
+    tbox('% Atingido', pct(pctP));
+
+  // FUNIL
+  const ct=somaLanc('ct'), orc=somaLanc('or'), vq=somaLanc('vq'), conv=orc>0?realP/orc:null;
+  document.getElementById('strip-funil').innerHTML =
+    tbox('Contatos', int(ct)) +
+    tbox('Orçamento em Aberto', brl0(orc), null, {sm:true}) +
+    tbox('Venda Quente', brl0(vq), null, {sm:true}) +
+    tbox('Conversão (Fat./Orç.)', pct(conv), null, {accent:true});
+
+  // RANKING LOJAS (mês)
+  const nLojas = state.config.lojas.length || 1;
+  let duMes=0; eachDate(mA,mB,(x)=>{ if(isDiaUtil(x,f)) duMes++; });
+  const metaMesLoja = metaDiaria()*duMes/nLojas;
+  const rows = state.config.lojas.map(l=>{
+    const fat = somaLanc('ft', mA, mB, l.nome);
+    return {nome:l.nome, regiao:l.regiao, fat, metaMes:metaMesLoja};
+  });
+  const totalFatMes = rows.reduce((s,x)=>s+x.fat,0);
+  rows.sort((a,b)=>b.fat-a.fat);
+  const tb = document.querySelector('#tbl-ranking tbody');
+  tb.innerHTML = rows.map(x=>{
+    const share = totalFatMes>0 ? x.fat/totalFatMes : 0;
+    const atg = x.metaMes>0 ? x.fat/x.metaMes : 0;
+    const pw = Math.min(100, atg*100);
+    return `<tr>
+      <td>${escapeHtml(x.nome)}</td>
+      <td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
+      <td class="num">${brl(x.fat)}</td>
+      <td class="num">${pct(share)}</td>
+      <td class="num">${brl0(x.metaMes)}</td>
+      <td><div class="miniprog"><i style="width:${pw}%"></i><b>${pct(atg)}</b></div></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderLancamento(){
+  const d = document.getElementById('lanc-data').value || refDate();
+  document.getElementById('lanc-data').value = d;
+  const util = isDiaUtil(d);
+  const ub = document.getElementById('lanc-util');
+  ub.textContent = util?'Dia útil':'Não útil';
+  ub.className = 'util '+(util?'sim':'nao');
+  const dt=D(d);
+  document.getElementById('lanc-semana').textContent = `${DIAS_SEM[mondayIndex(dt)]} · Semana ${weeknum2(dt)}`;
+
+  const tb = document.querySelector('#tbl-lanc tbody');
+  tb.innerHTML = state.config.lojas.map(l=>{
+    const k=d+'|'+l.nome; const v=state.lanc[k]||{ct:0,or:0,vq:0,ft:0};
+    return `<tr data-loja="${escapeHtml(l.nome)}">
+      <td>${escapeHtml(l.nome)}</td>
+      <td><span class="reg ${l.regiao}">${escapeHtml(l.regiao||'')}</span></td>
+      <td><input type="number" step="1"  min="0" data-f="ct" value="${v.ct||0}"></td>
+      <td><input type="number" step="0.01" min="0" data-f="or" value="${v.or||0}"></td>
+      <td><input type="number" step="0.01" min="0" data-f="vq" value="${v.vq||0}"></td>
+      <td><input type="number" step="0.01" min="0" data-f="ft" value="${v.ft||0}"></td>
+    </tr>`;
+  }).join('') + (()=> {
+    const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tft=somaLanc('ft',d,d);
+    return `<tr class="total-row"><td>TOTAL DO DIA</td><td></td>
+      <td class="num">${int(tct)}</td><td class="num">${brl(tor)}</td>
+      <td class="num">${brl(tvq)}</td><td class="num">${brl(tft)}</td></tr>`;
+  })();
+
+  tb.querySelectorAll('input[type=number]').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      const loja = inp.closest('tr').dataset.loja;
+      const campo = inp.dataset.f;
+      const k = d+'|'+loja;
+      if(!state.lanc[k]) state.lanc[k]={ct:0,or:0,vq:0,ft:0};
+      state.lanc[k][campo] = n(inp.value);
+      save();
+      // atualiza só a linha de total sem redesenhar tudo (evita perder foco)
+      const tr = document.querySelector('#tbl-lanc tbody tr.total-row');
+      if(tr){ const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tft=somaLanc('ft',d,d);
+        tr.children[2].textContent=int(tct); tr.children[3].textContent=brl(tor);
+        tr.children[4].textContent=brl(tvq); tr.children[5].textContent=brl(tft); }
+    });
+  });
+}
+
+function renderLoja(){
+  const r=refDate();
+  const [ma,mb]=monthBounds(r);
+  const mA=ma<state.config.inicio?state.config.inicio:ma, mB=mb>state.config.fim?state.config.fim:mb;
+  document.getElementById('loja-desc').textContent =
+    `Mês de referência: ${ddmm(D(mA))} a ${ddmm(D(mB))} · acumulado: ${ddmm(D(state.config.inicio))} a ${ddmm(D(state.config.fim))}`;
+
+  const f=feriadoSet(); let duMes=0; eachDate(mA,mB,(x)=>{ if(isDiaUtil(x,f)) duMes++; });
+  const metaMesLoja = metaDiaria()*duMes/(state.config.lojas.length||1);
+
+  // MÊS
+  let mrows = state.config.lojas.map(l=>({
+    nome:l.nome, regiao:l.regiao,
+    ct:somaLanc('ct',mA,mB,l.nome), or:somaLanc('or',mA,mB,l.nome),
+    vq:somaLanc('vq',mA,mB,l.nome), ft:somaLanc('ft',mA,mB,l.nome)
+  }));
+  const totFatM = mrows.reduce((s,x)=>s+x.ft,0);
+  mrows.sort((a,b)=>b.ft-a.ft);
+  const totM = {ct:0,or:0,vq:0,ft:0}; mrows.forEach(x=>{totM.ct+=x.ct;totM.or+=x.or;totM.vq+=x.vq;totM.ft+=x.ft;});
+  document.querySelector('#tbl-loja-mes tbody').innerHTML =
+    mrows.map(x=>`<tr>
+      <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
+      <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
+      <td class="num">${brl(x.ft)}</td>
+      <td class="num">${pct(totFatM>0?x.ft/totFatM:0)}</td>
+      <td class="num">${pct(metaMesLoja>0?x.ft/metaMesLoja:null)}</td></tr>`).join('') +
+    `<tr class="total-row"><td>TOTAL</td><td></td>
+      <td class="num">${int(totM.ct)}</td><td class="num">${brl(totM.or)}</td><td class="num">${brl(totM.vq)}</td>
+      <td class="num">${brl(totM.ft)}</td><td class="num">100,0%</td>
+      <td class="num">${pct(metaMesLoja*state.config.lojas.length>0?totM.ft/(metaMesLoja*state.config.lojas.length):null)}</td></tr>`;
+
+  // PERÍODO
+  let prows = state.config.lojas.map(l=>({
+    nome:l.nome, regiao:l.regiao,
+    ct:somaLanc('ct',null,null,l.nome), or:somaLanc('or',null,null,l.nome),
+    vq:somaLanc('vq',null,null,l.nome), ft:somaLanc('ft',null,null,l.nome)
+  }));
+  const totFatP = prows.reduce((s,x)=>s+x.ft,0);
+  prows.sort((a,b)=>b.ft-a.ft);
+  const totP = {ct:0,or:0,vq:0,ft:0}; prows.forEach(x=>{totP.ct+=x.ct;totP.or+=x.or;totP.vq+=x.vq;totP.ft+=x.ft;});
+  document.querySelector('#tbl-loja-periodo tbody').innerHTML =
+    prows.map(x=>`<tr>
+      <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
+      <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
+      <td class="num">${brl(x.ft)}</td><td class="num">${pct(totFatP>0?x.ft/totFatP:0)}</td></tr>`).join('') +
+    `<tr class="total-row"><td>TOTAL</td><td></td>
+      <td class="num">${int(totP.ct)}</td><td class="num">${brl(totP.or)}</td><td class="num">${brl(totP.vq)}</td>
+      <td class="num">${brl(totP.ft)}</td><td class="num">100,0%</td></tr>`;
+}
+
+function buildWeeks(){
+  // agrupa datas do período em semanas (segunda a domingo), recortadas ao período
+  const groups={};
+  const order=[];
+  eachDate(state.config.inicio, state.config.fim, (x,dt)=>{
+    const mon=iso(addDays(dt,-mondayIndex(dt)));
+    if(!groups[mon]){ groups[mon]={num:weeknum2(dt), datas:[]}; order.push(mon); }
+    groups[mon].datas.push(x);
+  });
+  return order.map(mon=>{
+    const g=groups[mon]; const a=g.datas[0], b=g.datas[g.datas.length-1];
+    return {num:g.num, a, b, label:`${ddmm(D(a))} a ${ddmm(D(b))}`};
+  });
+}
+function renderSemanal(){
+  const weeks=buildWeeks();
+  document.querySelector('#tbl-semanal tbody').innerHTML = weeks.map(w=>{
+    const meta=metaRange(w.a,w.b), real=somaLanc('ft',w.a,w.b), dif=real-meta, p=meta>0?real/meta:null;
+    return `<tr>
+      <td>${w.num}</td><td>${w.label}</td>
+      <td class="num">${brl(meta)}</td><td class="num">${brl(real)}</td>
+      <td class="num" style="color:${dif<0?'var(--erro)':'var(--verde)'}">${brl(dif)}</td>
+      <td class="num">${pct(p)}</td></tr>`;
+  }).join('');
+}
+
+function renderMensal(){
+  const meses=[];
+  let dt=D(state.config.inicio); const end=D(state.config.fim);
+  const nomes=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const seen=new Set();
+  while(dt<=end){
+    const key=dt.getFullYear()+'-'+dt.getMonth();
+    if(!seen.has(key)){ seen.add(key);
+      const first=new Date(dt.getFullYear(),dt.getMonth(),1), last=new Date(dt.getFullYear(),dt.getMonth()+1,0);
+      meses.push({label:`${nomes[dt.getMonth()]}/${dt.getFullYear()}`,
+        a: iso(first)<state.config.inicio?state.config.inicio:iso(first),
+        b: iso(last)>state.config.fim?state.config.fim:iso(last)});
+    }
+    dt=new Date(dt.getFullYear(),dt.getMonth()+1,1);
+  }
+  const r=refDate(); const f=feriadoSet();
+  let tMeta=0,tReal=0;
+  const body = meses.map(m=>{
+    const meta=metaRange(m.a,m.b), real=somaLanc('ft',m.a,m.b), dif=real-meta, p=meta>0?real/meta:null;
+    tMeta+=meta; tReal+=real;
+    // dias úteis restantes: se o mês é o de referência, conta após a data ref; se futuro, mês inteiro; se passado, 0
+    let duRest=0; const start = (r>=m.a && r<=m.b) ? iso(addDays(D(r),1)) : (r<m.a ? m.a : iso(addDays(D(m.b),1)));
+    if(start<=m.b) eachDate(start, m.b, (x)=>{ if(isDiaUtil(x,f)) duRest++; });
+    const metaNec = duRest>0 ? Math.max(meta-real,0)/duRest : 0;
+    return `<tr>
+      <td>${m.label}</td>
+      <td class="num">${brl0(meta)}</td><td class="num">${brl(real)}</td>
+      <td class="num" style="color:${dif<0?'var(--erro)':'var(--verde)'}">${brl(dif)}</td>
+      <td class="num">${pct(p)}</td>
+      <td class="num">${duRest>0?int(duRest):'—'}</td>
+      <td class="num">${duRest>0?brl0(metaNec):'—'}</td></tr>`;
+  }).join('');
+  const tDif=tReal-tMeta, tp=tMeta>0?tReal/tMeta:null;
+  document.querySelector('#tbl-mensal tbody').innerHTML = body +
+    `<tr class="total-row"><td>TOTAL PERÍODO</td>
+      <td class="num">${brl0(tMeta)}</td><td class="num">${brl(tReal)}</td>
+      <td class="num">${brl(tDif)}</td><td class="num">${pct(tp)}</td><td></td><td></td></tr>`;
+}
+
+function renderParametros(){
+  document.getElementById('p-meta').value = state.config.metaTotal;
+  document.getElementById('p-inicio').value = state.config.inicio;
+  document.getElementById('p-fim').value = state.config.fim;
+  document.getElementById('p-diasuteis').value = diasUteisPeriodo()+' dias';
+  document.getElementById('p-metadiaria').value = brl(metaDiaria());
+
+  document.querySelector('#tbl-feriados tbody').innerHTML = state.config.feriados
+    .slice().sort((a,b)=>a.data.localeCompare(b.data)).map((fr)=>{
+      const realIdx = state.config.feriados.indexOf(fr);
+      return `<tr><td>${ddmm(D(fr.data))}/${D(fr.data).getFullYear()}</td><td>${escapeHtml(fr.desc)}</td>
+        <td><button class="btn danger small" data-rem-fer="${realIdx}" type="button">remover</button></td></tr>`;
+    }).join('') || `<tr><td colspan="3" style="color:var(--texto-suave)">Nenhum feriado cadastrado.</td></tr>`;
+  document.querySelectorAll('[data-rem-fer]').forEach(b=>b.onclick=()=>{ state.config.feriados.splice(+b.dataset.remFer,1); save(); renderParametros(); });
+
+  document.querySelector('#tbl-lojas tbody').innerHTML = state.config.lojas.map((l,i)=>
+    `<tr><td>${escapeHtml(l.nome)}</td><td><span class="reg ${l.regiao}">${escapeHtml(l.regiao||'')}</span></td>
+      <td><button class="btn danger small" data-rem-loja="${i}" type="button">remover</button></td></tr>`).join('');
+  document.querySelectorAll('[data-rem-loja]').forEach(b=>b.onclick=()=>{ state.config.lojas.splice(+b.dataset.remLoja,1); save(); renderParametros(); });
+}
+
+function renderAll(){
+  renderPainel(); renderLoja(); renderSemanal(); renderMensal();
+  const lp=document.getElementById('pane-lancamento'); if(lp.classList.contains('active')) renderLancamento();
+  const pp=document.getElementById('pane-parametros'); if(pp.classList.contains('active')) renderParametros();
+}
+
+/* =========================================================================
+   EVENTOS
+   ========================================================================= */
+document.getElementById('tabs').addEventListener('click', e=>{
+  const btn=e.target.closest('button[data-tab]'); if(!btn) return;
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('section.pane').forEach(p=>p.classList.remove('active'));
+  document.getElementById('pane-'+btn.dataset.tab).classList.add('active');
+  if(btn.dataset.tab==='lancamento') renderLancamento();
+  if(btn.dataset.tab==='parametros') renderParametros();
+  if(btn.dataset.tab==='painel') renderPainel();
+  if(btn.dataset.tab==='loja') renderLoja();
+});
+
+document.getElementById('ref-data').addEventListener('change', ()=>{ renderPainel(); renderLoja(); renderMensal(); });
+
+document.getElementById('lanc-data').addEventListener('change', renderLancamento);
+document.getElementById('dia-prev').addEventListener('click', ()=>{ const el=document.getElementById('lanc-data'); el.value=iso(addDays(D(el.value||refDate()),-1)); renderLancamento(); });
+document.getElementById('dia-next').addEventListener('click', ()=>{ const el=document.getElementById('lanc-data'); el.value=iso(addDays(D(el.value||refDate()), 1)); renderLancamento(); });
+
+/* Parâmetros */
+document.getElementById('btn-salvar-params').addEventListener('click', ()=>{
+  const meta=n(document.getElementById('p-meta').value);
+  const ini=document.getElementById('p-inicio').value, fim=document.getElementById('p-fim').value;
+  if(!ini||!fim||ini>fim){ toast('Verifique as datas de início e fim.'); return; }
+  state.config.metaTotal=meta; state.config.inicio=ini; state.config.fim=fim;
+  save(); document.getElementById('ref-data').min=ini; document.getElementById('ref-data').max=fim;
+  document.getElementById('ref-data').value=clampRef(document.getElementById('ref-data').value||iso(new Date()));
+  renderParametros(); renderAll(); toast('Parâmetros salvos.');
+});
+document.getElementById('btn-add-feriado').addEventListener('click', ()=>{
+  const d=document.getElementById('fer-data').value, desc=document.getElementById('fer-desc').value.trim();
+  if(!d){ toast('Escolha a data do feriado.'); return; }
+  state.config.feriados.push({data:d, desc:desc||'Feriado'});
+  document.getElementById('fer-data').value=''; document.getElementById('fer-desc').value='';
+  save(); renderParametros(); renderAll(); toast('Feriado adicionado.');
+});
+document.getElementById('btn-add-loja').addEventListener('click', ()=>{
+  const nome=document.getElementById('loja-nome').value.trim().toUpperCase();
+  const reg=document.getElementById('loja-reg').value.trim().toUpperCase();
+  if(!nome){ toast('Informe o nome da loja.'); return; }
+  if(state.config.lojas.some(l=>l.nome===nome)){ toast('Essa loja já existe.'); return; }
+  state.config.lojas.push({nome, regiao:reg||'R1'});
+  document.getElementById('loja-nome').value=''; document.getElementById('loja-reg').value='';
+  save(); renderParametros(); renderAll(); toast('Loja adicionada.');
+});
+document.getElementById('btn-reset').addEventListener('click', ()=>{
+  if(!confirm('Restaurar os dados de exemplo? Isso substitui os lançamentos e a configuração atuais.')) return;
+  state=defaultState(); save(); initRef(); renderParametros(); renderAll(); toast('Dados de exemplo restaurados.');
+});
+
+/* Export / Import */
+function download(name, content, type){
+  const blob=new Blob([content],{type:type||'text/plain;charset=utf-8'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),500);
+}
+document.getElementById('btn-export-csv').addEventListener('click', ()=>{
+  let csv='Data;Loja;Regiao;Contatos;Orcamento;VendaQuente;Faturado\n';
+  const regMap={}; state.config.lojas.forEach(l=>regMap[l.nome]=l.regiao);
+  Object.keys(state.lanc).sort().forEach(k=>{
+    const [d,lj]=k.split('|'); const v=state.lanc[k];
+    csv+=`${d};${lj};${regMap[lj]||''};${v.ct||0};${(v.or||0).toFixed(2)};${(v.vq||0).toFixed(2)};${(v.ft||0).toFixed(2)}\n`;
+  });
+  download('lancamentos_faturamento.csv', csv, 'text/csv;charset=utf-8');
+  toast('CSV exportado.');
+});
+document.getElementById('btn-export-json').addEventListener('click', ()=>{ download('faturamento_dados.json', JSON.stringify(state,null,2), 'application/json'); toast('JSON exportado.'); });
+document.getElementById('inp-import-json').addEventListener('change', e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ try{ const s=JSON.parse(rd.result); if(!s.config||!s.lanc) throw 0; state=s; save(); initRef(); renderParametros(); renderAll(); toast('Dados importados.'); }
+    catch(err){ toast('Arquivo inválido.'); } };
+  rd.readAsText(file); e.target.value='';
+});
+
+/* =========================================================================
+   INIT
+   ========================================================================= */
+function initRef(){
+  const ref=document.getElementById('ref-data');
+  ref.min=state.config.inicio; ref.max=state.config.fim;
+  ref.value=clampRef(iso(new Date()));
+  document.getElementById('lanc-data').value=ref.value;
+}
+/* =========================================================================
+   MICROSOFT GRAPH — login + armazenamento compartilhado no SharePoint
+   (mesmo tenant/site/clientId do app de Orçamentos MCPO)
+   ========================================================================= */
+function getRedirectUri(){
+  const loc = window.location;
+  if(loc.hostname.includes('sharepoint.com') || loc.hostname.includes('onedrive.live.com')){
+    return loc.href.replace(/\/[^\/]*$/, '/redirect.html').split('?')[0].split('#')[0];
+  }
+  return loc.href.split('?')[0].split('#')[0];
+}
+const MSAL_CONFIG = {
+  auth:{
+    clientId:'a02d9ccd-9650-4855-99ce-3ad5ec98c381',
+    authority:'https://login.microsoftonline.com/aa796efe-0373-4718-9911-6cbf0bfa260f',
+    redirectUri:getRedirectUri(),
+    postLogoutRedirectUri:getRedirectUri(),
+  },
+  cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:true },
+};
+const GRAPH_SCOPES = ['Files.ReadWrite','Sites.ReadWrite.All','User.Read'];
+const SP_HOSTNAME   = 'maqcampoirrigacao.sharepoint.com';
+const SP_SITE_PATH  = '/sites/MCPOIRRIGACAO';
+const SP_BIBLIOTECA = 'Documentos Compartilhados';
+const SP_PASTA      = 'Faturamento';                 // pasta própria deste app
+const DADOS_FILE    = 'faturamento_dados.json';      // { config, lanc }
+const ACESSO_FILE   = 'faturamento_acesso.json';     // { emailsAutorizados, emailsComuns }
+
+let msalInstance=null, msAccount=null, msalReady=false;
+let acesso={ emailsAutorizados:[], emailsComuns:[] };
+
+function spEncodePath(p){ return p.split('/').map(seg=>encodeURIComponent(seg)).join('/'); }
+function spPath(file){ return `/${SP_BIBLIOTECA}/${SP_PASTA}/${file}`; }
+
+let _siteId=null;
+async function getSiteId(){
+  if(_siteId) return _siteId;
+  const token=await getGraphToken(); if(!token) return null;
+  try{
+    const r=await fetch(`https://graph.microsoft.com/v1.0/sites/${SP_HOSTNAME}:${SP_SITE_PATH}`,{headers:{Authorization:'Bearer '+token}});
+    if(!r.ok) return null; const d=await r.json(); _siteId=d.id; return _siteId;
+  }catch(e){ return null; }
+}
+async function spDriveUrl(filePath){ const s=await getSiteId(); if(!s) return null; return `https://graph.microsoft.com/v1.0/sites/${s}/drive/root:${spEncodePath(filePath)}`; }
+async function getGraphToken(){
+  if(!msalInstance||!msAccount) return null;
+  try{ const r=await msalInstance.acquireTokenSilent({scopes:GRAPH_SCOPES,account:msAccount}); return r.accessToken; }
+  catch(e){ try{ const r=await msalInstance.acquireTokenPopup({scopes:GRAPH_SCOPES}); return r.accessToken; }catch(e2){ return null; } }
+}
+async function graphGetJson(filePath){
+  const token=await getGraphToken(); if(!token) return null;
+  const base=await spDriveUrl(filePath); if(!base) return null;
+  try{ const r=await fetch(base+':/content',{headers:{Authorization:'Bearer '+token}}); if(!r.ok) return null; return await r.json(); }
+  catch(e){ return null; }
+}
+async function graphPut(filePath, body){
+  const token=await getGraphToken(); if(!token) return false;
+  const base=await spDriveUrl(filePath); if(!base) return false;
+  try{ const r=await fetch(base+':/content',{method:'PUT',headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'},body}); return r.ok; }
+  catch(e){ return false; }
+}
+let _pastaOk=false;
+async function ensureFolder(){
+  if(_pastaOk) return true;
+  const token=await getGraphToken(); if(!token) return false;
+  const base=await spDriveUrl(`/${SP_BIBLIOTECA}`); if(!base) return false;
+  try{
+    await fetch(base+':/children',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({name:SP_PASTA, folder:{}, '@microsoft.graph.conflictBehavior':'fail'})});
+  }catch(e){}
+  _pastaOk=true; return true;
+}
+
+/* ---------- init / login ---------- */
+async function initAuth(){
+  try{
+    await loadMsal();
+    const MsalClass = window.msal && window.msal.PublicClientApplication;
+    if(!MsalClass) throw new Error('MSAL indisponível');
+    msalInstance = new MsalClass(MSAL_CONFIG);
+    await msalInstance.initialize();
+    msalReady=true;
+    const accs=msalInstance.getAllAccounts();
+    if(accs.length){ msAccount=accs[0]; await sincronizarNuvem(true); }
+    updateLoginUI(); applyAccess();
+  }catch(e){
+    // Sem MSAL (ex.: aberto como arquivo local) → segue em modo local, sem bloquear
+    msalReady=false;
+    document.getElementById('ms-login-label').textContent='🔑 Entrar com Microsoft';
+    const info=document.getElementById('ms-user-info'); info.textContent='(modo local — login indisponível)'; info.style.display='block';
+  }
+}
+function updateLoginUI(){
+  const lbl=document.getElementById('ms-login-label'), info=document.getElementById('ms-user-info');
+  if(msAccount){ lbl.textContent='✓ '+(msAccount.name||msAccount.username); info.textContent='SharePoint › '+SP_PASTA; info.style.display='block'; }
+  else{ lbl.textContent='🔑 Entrar com Microsoft'; info.style.display='none'; }
+}
+document.getElementById('btn-ms-login').addEventListener('click', async ()=>{
+  if(!msalInstance){ toast('Autenticação ainda inicializando — aguarde e tente de novo.'); return; }
+  if(msAccount){
+    if(confirm('Sair de '+msAccount.username+'?')){ try{ await msalInstance.logoutPopup({account:msAccount}); }catch(e){} msAccount=null; updateLoginUI(); applyAccess(); }
+    return;
+  }
+  try{
+    document.getElementById('ms-login-label').textContent='⏳ Abrindo login...';
+    const resp=await msalInstance.loginPopup({scopes:GRAPH_SCOPES});
+    msAccount=resp.account; updateLoginUI();
+    await sincronizarNuvem(true); applyAccess(); renderAll();
+    toast('Logado como '+msAccount.username);
+  }catch(e){
+    document.getElementById('ms-login-label').textContent='🔑 Entrar com Microsoft';
+    if((e.message||'').includes('popup')||e.errorCode==='popup_window_error') toast('Popup bloqueado — libere popups para este site.');
+    else if(e.errorCode==='user_cancelled') toast('Login cancelado.');
+    else toast('Erro no login: '+(e.errorCode||e.message||'desconhecido'));
+  }
+});
+
+/* ---------- carregar/gravar dados compartilhados ---------- */
+async function sincronizarNuvem(silencioso){
+  if(!msAccount) return;
+  const ac=await graphGetJson(spPath(ACESSO_FILE));
+  if(ac && (ac.emailsAutorizados||ac.emailsComuns)) acesso={emailsAutorizados:ac.emailsAutorizados||[], emailsComuns:ac.emailsComuns||[]};
+  const dados=await graphGetJson(spPath(DADOS_FILE));
+  if(dados && dados.config && dados.lanc){ state=dados; try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){} }
+  initRef(); renderParametros(); renderAll();
+  if(!silencioso) toast('Dados atualizados da nuvem.');
+}
+let _saveTimer=null;
+function scheduleCloudSave(){
+  if(!msAccount || nivelAcesso()==='bloqueado') return;
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(async ()=>{
+    await ensureFolder();
+    const ok=await graphPut(spPath(DADOS_FILE), new TextEncoder().encode(JSON.stringify(state)));
+    if(ok) toast('Salvo na nuvem ✓');
+  }, 1200);
+}
+async function saveAcesso(){
+  if(!msAccount){ toast('Entre com o Microsoft para gerenciar usuários.'); return; }
+  await ensureFolder();
+  await graphPut(spPath(ACESSO_FILE), new TextEncoder().encode(JSON.stringify(acesso)));
+}
+
+/* ---------- níveis de acesso ---------- */
+function emailAtual(){ return msAccount ? (msAccount.username||'').toLowerCase() : ''; }
+function nivelAcesso(){
+  if(!msAccount) return msalReady ? 'deslogado' : 'local';
+  const e=emailAtual();
+  if(acesso.emailsAutorizados.map(x=>x.toLowerCase()).includes(e)) return 'admin';
+  if(acesso.emailsComuns.map(x=>x.toLowerCase()).includes(e)) return 'comum';
+  if(!acesso.emailsAutorizados.length && !acesso.emailsComuns.length) return 'admin'; // primeiro acesso
+  return 'bloqueado';
+}
+function applyAccess(){
+  const nivel=nivelAcesso();
+  const ovLogin=document.getElementById('overlay-login'), ovNeg=document.getElementById('overlay-negado');
+  const tabParam=document.querySelector('#tabs button[data-tab="parametros"]');
+
+  if(nivel==='deslogado'){ ovLogin.style.display='flex'; ovNeg.style.display='none'; return; }
+  ovLogin.style.display='none';
+
+  if(nivel==='bloqueado'){ ovNeg.style.display='flex'; document.getElementById('overlay-email-info').textContent='Logado como: '+emailAtual(); return; }
+  ovNeg.style.display='none';
+
+  const isAdmin = (nivel==='admin' || nivel==='local'); // modo local libera tudo p/ testes offline
+  document.body.classList.toggle('is-admin', isAdmin);
+  tabParam.style.display = isAdmin ? '' : 'none';
+  if(!isAdmin && document.getElementById('pane-parametros').classList.contains('active')){
+    document.querySelector('#tabs button[data-tab="painel"]').click();
+  }
+  // trava campos de parâmetro para não-admin (defesa extra)
+  document.querySelectorAll('#pane-parametros input, #pane-parametros button').forEach(el=>{
+    if(el.id==='inp-novo-admin'||el.id==='inp-novo-comum'||el.id==='btn-add-admin'||el.id==='btn-add-comum') return;
+    el.disabled = !isAdmin;
+  });
+  const el=document.getElementById('email-logado'); if(el) el.textContent = emailAtual()||'— (modo local)';
+}
+
+/* ---------- gerência de usuários ---------- */
+function renderUsuarios(){
+  const la=document.getElementById('lista-admins'); if(!la) return;
+  la.innerHTML = acesso.emailsAutorizados.length ? acesso.emailsAutorizados.map((em,i)=>
+    `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--areia-escura);">
+      <span style="flex:1;">👤 ${escapeHtml(em)} <span class="reg R1" style="margin-left:4px;">ADMIN</span></span>
+      <button class="btn danger small" data-rem-admin="${i}" type="button">remover</button></div>`).join('')
+    : `<div style="color:var(--texto-suave);font-size:.82rem;">Nenhum admin — o primeiro login vira admin automaticamente.</div>`;
+  la.querySelectorAll('[data-rem-admin]').forEach(b=>b.onclick=async()=>{ acesso.emailsAutorizados.splice(+b.dataset.remAdmin,1); await saveAcesso(); renderUsuarios(); applyAccess(); });
+
+  const lc=document.getElementById('lista-comuns');
+  lc.innerHTML = acesso.emailsComuns.length ? acesso.emailsComuns.map((em,i)=>
+    `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--areia-escura);">
+      <span style="flex:1;">👤 ${escapeHtml(em)}</span>
+      <button class="btn danger small" data-rem-comum="${i}" type="button">remover</button></div>`).join('')
+    : `<div style="color:var(--texto-suave);font-size:.82rem;">Nenhum usuário comum cadastrado.</div>`;
+  lc.querySelectorAll('[data-rem-comum]').forEach(b=>b.onclick=async()=>{ acesso.emailsComuns.splice(+b.dataset.remComum,1); await saveAcesso(); renderUsuarios(); });
+}
+document.getElementById('btn-add-admin').addEventListener('click', async ()=>{
+  const em=document.getElementById('inp-novo-admin').value.trim().toLowerCase(); if(!em) return;
+  if(!acesso.emailsAutorizados.map(x=>x.toLowerCase()).includes(em)) acesso.emailsAutorizados.push(em);
+  acesso.emailsComuns=acesso.emailsComuns.filter(x=>x.toLowerCase()!==em);
+  document.getElementById('inp-novo-admin').value=''; await saveAcesso(); renderUsuarios(); applyAccess(); toast('Admin adicionado.');
+});
+document.getElementById('btn-add-comum').addEventListener('click', async ()=>{
+  const em=document.getElementById('inp-novo-comum').value.trim().toLowerCase(); if(!em) return;
+  if(acesso.emailsAutorizados.map(x=>x.toLowerCase()).includes(em)){ toast('Esse e-mail já é admin.'); return; }
+  if(!acesso.emailsComuns.map(x=>x.toLowerCase()).includes(em)) acesso.emailsComuns.push(em);
+  document.getElementById('inp-novo-comum').value=''; await saveAcesso(); renderUsuarios(); toast('Usuário adicionado.');
+});
+document.getElementById('btn-sync').addEventListener('click', ()=>{ if(!msAccount){ toast('Entre com o Microsoft primeiro.'); return; } sincronizarNuvem(false); });
+
+// injeta a renderização de usuários dentro do renderParametros existente
+const _renderParametros0 = renderParametros;
+renderParametros = function(){ _renderParametros0(); renderUsuarios(); };
+
+initRef();
+renderAll();
+initAuth();
+</script>
+</body>
+</html>
