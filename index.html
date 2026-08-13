@@ -134,6 +134,7 @@ function loadMsal(){
   table.dt tr.total-row td{background:var(--areia-escura);font-weight:700;color:var(--azul-escuro);border-top:2px solid var(--azul-escuro);}
   table.dt input[type=number]{width:100%;min-width:78px;padding:5px 6px;border:1px solid var(--borda);border-radius:4px;text-align:right;font-family:var(--fonte-dado);font-size:.82rem;background:#fffdf9;}
   table.dt input[type=number]:focus{outline:2px solid var(--azul-claro);outline-offset:0;}
+  table.dt input.ft-alerta{border-color:var(--ferrugem);background:#fbeee6;color:var(--ferrugem);font-weight:700;}
   .tablewrap{overflow-x:auto;border:1px solid var(--borda);border-radius:6px;}
 
   .reg{display:inline-block;font-size:.62rem;padding:2px 6px;border-radius:3px;font-weight:700;letter-spacing:.3px;}
@@ -267,7 +268,7 @@ function loadMsal(){
           <thead><tr>
             <th>Loja</th><th>Região</th>
             <th class="r">Contatos</th><th class="r">Orçamento (R$)</th>
-            <th class="r">Venda Quente (R$)</th><th class="r">Faturado (R$)</th>
+            <th class="r">Venda Quente (R$)</th><th class="r">Orç. Perdido (R$)</th><th class="r">Faturado (R$)</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -293,7 +294,7 @@ function loadMsal(){
       <table class="dt" id="tbl-loja-mes">
         <thead><tr>
           <th>Loja</th><th>Região</th><th class="r">Contatos</th><th class="r">Orçamento</th>
-          <th class="r">Venda Quente</th><th class="r">Faturado</th><th class="r">% do Faturado</th><th class="r">% da Meta</th>
+          <th class="r">Venda Quente</th><th class="r">Perdido</th><th class="r">% Perda</th><th class="r">Faturado</th><th class="r">% do Faturado</th><th class="r">% da Meta</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -304,7 +305,7 @@ function loadMsal(){
       <table class="dt" id="tbl-loja-periodo">
         <thead><tr>
           <th>Loja</th><th>Região</th><th class="r">Contatos</th><th class="r">Orçamento</th>
-          <th class="r">Venda Quente</th><th class="r">Faturado</th><th class="r">% do Faturado</th>
+          <th class="r">Venda Quente</th><th class="r">Perdido</th><th class="r">% Perda</th><th class="r">Faturado</th><th class="r">% do Faturado</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -319,7 +320,7 @@ function loadMsal(){
       <table class="dt" id="tbl-semanal">
         <thead><tr>
           <th>Semana</th><th>Período</th><th class="r">Meta da Semana</th>
-          <th class="r">Realizado</th><th class="r">Diferença</th><th class="r">% Atingido</th>
+          <th class="r">Realizado</th><th class="r">Perdido</th><th class="r">Diferença</th><th class="r">% Atingido</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -333,7 +334,7 @@ function loadMsal(){
     <div class="tablewrap">
       <table class="dt" id="tbl-mensal">
         <thead><tr>
-          <th>Mês</th><th class="r">Meta</th><th class="r">Realizado</th><th class="r">Diferença</th>
+          <th>Mês</th><th class="r">Meta</th><th class="r">Realizado</th><th class="r">Perdido</th><th class="r">Diferença</th>
           <th class="r">% Atingido</th><th class="r">Dias Úteis Rest.</th><th class="r">Meta Diária Nec.</th>
         </tr></thead>
         <tbody></tbody>
@@ -581,12 +582,21 @@ function renderPainel(){
     tbox('% Atingido', pct(pctP));
 
   // FUNIL
-  const ct=somaLanc('ct'), orc=somaLanc('or'), vq=somaLanc('vq'), conv=orc>0?realP/orc:null;
+  const ct=somaLanc('ct'), orc=somaLanc('or'), vq=somaLanc('vq'), pd=somaLanc('pd');
+  const orcAberto=Math.max(orc-vq-pd,0);          // orçamentos que não esquentaram nem se perderam
+  const vqAberto=Math.max(vq-realP,0);            // venda quente ainda não faturada
+  const convOQ=orc>0?vq/orc:null;                 // orçamento → quente
+  const convQF=vq>0?realP/vq:null;                // quente → faturado
+  const taxaPerda=orc>0?pd/orc:null;              // % de perda sobre orçamento
+  const convTotal=orc>0?realP/orc:null;           // funil completo
   document.getElementById('strip-funil').innerHTML =
     tbox('Contatos', int(ct)) +
-    tbox('Orçamento em Aberto', brl0(orc), null, {sm:true}) +
-    tbox('Venda Quente', brl0(vq), null, {sm:true}) +
-    tbox('Conversão (Fat./Orç.)', pct(conv), null, {accent:true});
+    tbox('Orçamento (total)', brl0(orc), `em aberto: ${brl0(orcAberto)}`, {sm:true}) +
+    tbox('Venda Quente (total)', brl0(vq), `em aberto: ${brl0(vqAberto)}`, {sm:true}) +
+    tbox('Orçamento Perdido', brl0(pd), `taxa de perda: ${pct(taxaPerda)}`, {sm:true, accent:true}) +
+    tbox('Conversão Orç.→Quente', pct(convOQ)) +
+    tbox('Conversão Quente→Fat.', pct(convQF)) +
+    tbox('Conversão Total', pct(convTotal), null, {accent:true});
 
   // RANKING LOJAS (mês)
   const nLojas = state.config.lojas.length || 1;
@@ -626,20 +636,24 @@ function renderLancamento(){
 
   const tb = document.querySelector('#tbl-lanc tbody');
   tb.innerHTML = state.config.lojas.map(l=>{
-    const k=d+'|'+l.nome; const v=state.lanc[k]||{ct:0,or:0,vq:0,ft:0};
+    const k=d+'|'+l.nome; const v=state.lanc[k]||{ct:0,or:0,vq:0,pd:0,ft:0};
+    // aviso: faturado acumulado da loja não deveria passar da venda quente acumulada
+    const vqAc=somaLanc('vq',null,null,l.nome), ftAc=somaLanc('ft',null,null,l.nome);
+    const alerta = ftAc>vqAc+0.005;
     return `<tr data-loja="${escapeHtml(l.nome)}">
       <td>${escapeHtml(l.nome)}</td>
       <td><span class="reg ${l.regiao}">${escapeHtml(l.regiao||'')}</span></td>
       <td><input type="number" step="1"  min="0" data-f="ct" value="${v.ct||0}"></td>
       <td><input type="number" step="0.01" min="0" data-f="or" value="${v.or||0}"></td>
       <td><input type="number" step="0.01" min="0" data-f="vq" value="${v.vq||0}"></td>
-      <td><input type="number" step="0.01" min="0" data-f="ft" value="${v.ft||0}"></td>
+      <td><input type="number" step="0.01" min="0" data-f="pd" value="${v.pd||0}"></td>
+      <td><input type="number" step="0.01" min="0" data-f="ft" value="${v.ft||0}" class="${alerta?'ft-alerta':''}" title="${alerta?'Faturado acumulado acima da venda quente acumulada desta loja':''}"></td>
     </tr>`;
   }).join('') + (()=> {
-    const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tft=somaLanc('ft',d,d);
+    const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tpd=somaLanc('pd',d,d), tft=somaLanc('ft',d,d);
     return `<tr class="total-row"><td>TOTAL DO DIA</td><td></td>
       <td class="num">${int(tct)}</td><td class="num">${brl(tor)}</td>
-      <td class="num">${brl(tvq)}</td><td class="num">${brl(tft)}</td></tr>`;
+      <td class="num">${brl(tvq)}</td><td class="num">${brl(tpd)}</td><td class="num">${brl(tft)}</td></tr>`;
   })();
 
   tb.querySelectorAll('input[type=number]').forEach(inp=>{
@@ -647,15 +661,20 @@ function renderLancamento(){
       const loja = inp.closest('tr').dataset.loja;
       const campo = inp.dataset.f;
       const k = d+'|'+loja;
-      if(!state.lanc[k]) state.lanc[k]={ct:0,or:0,vq:0,ft:0};
+      if(!state.lanc[k]) state.lanc[k]={ct:0,or:0,vq:0,pd:0,ft:0};
       state.lanc[k][campo] = n(inp.value);
       dirtyLanc.add(k);
       save();
-      // atualiza só a linha de total sem redesenhar tudo (evita perder foco)
+      // atualiza a linha de total e o aviso da loja sem redesenhar tudo (evita perder foco)
       const tr = document.querySelector('#tbl-lanc tbody tr.total-row');
-      if(tr){ const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tft=somaLanc('ft',d,d);
+      if(tr){ const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tpd=somaLanc('pd',d,d), tft=somaLanc('ft',d,d);
         tr.children[2].textContent=int(tct); tr.children[3].textContent=brl(tor);
-        tr.children[4].textContent=brl(tvq); tr.children[5].textContent=brl(tft); }
+        tr.children[4].textContent=brl(tvq); tr.children[5].textContent=brl(tpd); tr.children[6].textContent=brl(tft); }
+      if(campo==='vq'||campo==='ft'){
+        const vqAc=somaLanc('vq',null,null,loja), ftAc=somaLanc('ft',null,null,loja), al=ftAc>vqAc+0.005;
+        const ftInp=inp.closest('tr').querySelector('input[data-f="ft"]');
+        if(ftInp){ ftInp.classList.toggle('ft-alerta', al); ftInp.title = al?'Faturado acumulado acima da venda quente acumulada desta loja':''; }
+      }
     });
   });
 }
@@ -674,20 +693,22 @@ function renderLoja(){
   let mrows = state.config.lojas.map(l=>({
     nome:l.nome, regiao:l.regiao,
     ct:somaLanc('ct',mA,mB,l.nome), or:somaLanc('or',mA,mB,l.nome),
-    vq:somaLanc('vq',mA,mB,l.nome), ft:somaLanc('ft',mA,mB,l.nome)
+    vq:somaLanc('vq',mA,mB,l.nome), pd:somaLanc('pd',mA,mB,l.nome), ft:somaLanc('ft',mA,mB,l.nome)
   }));
   const totFatM = mrows.reduce((s,x)=>s+x.ft,0);
   mrows.sort((a,b)=>b.ft-a.ft);
-  const totM = {ct:0,or:0,vq:0,ft:0}; mrows.forEach(x=>{totM.ct+=x.ct;totM.or+=x.or;totM.vq+=x.vq;totM.ft+=x.ft;});
+  const totM = {ct:0,or:0,vq:0,pd:0,ft:0}; mrows.forEach(x=>{totM.ct+=x.ct;totM.or+=x.or;totM.vq+=x.vq;totM.pd+=x.pd;totM.ft+=x.ft;});
   document.querySelector('#tbl-loja-mes tbody').innerHTML =
     mrows.map(x=>`<tr>
       <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
       <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
+      <td class="num">${brl(x.pd)}</td><td class="num">${pct(x.or>0?x.pd/x.or:null)}</td>
       <td class="num">${brl(x.ft)}</td>
       <td class="num">${pct(totFatM>0?x.ft/totFatM:0)}</td>
       <td class="num">${pct(metaMesLoja>0?x.ft/metaMesLoja:null)}</td></tr>`).join('') +
     `<tr class="total-row"><td>TOTAL</td><td></td>
       <td class="num">${int(totM.ct)}</td><td class="num">${brl(totM.or)}</td><td class="num">${brl(totM.vq)}</td>
+      <td class="num">${brl(totM.pd)}</td><td class="num">${pct(totM.or>0?totM.pd/totM.or:null)}</td>
       <td class="num">${brl(totM.ft)}</td><td class="num">100,0%</td>
       <td class="num">${pct(metaMesLoja*state.config.lojas.length>0?totM.ft/(metaMesLoja*state.config.lojas.length):null)}</td></tr>`;
 
@@ -695,18 +716,20 @@ function renderLoja(){
   let prows = state.config.lojas.map(l=>({
     nome:l.nome, regiao:l.regiao,
     ct:somaLanc('ct',null,null,l.nome), or:somaLanc('or',null,null,l.nome),
-    vq:somaLanc('vq',null,null,l.nome), ft:somaLanc('ft',null,null,l.nome)
+    vq:somaLanc('vq',null,null,l.nome), pd:somaLanc('pd',null,null,l.nome), ft:somaLanc('ft',null,null,l.nome)
   }));
   const totFatP = prows.reduce((s,x)=>s+x.ft,0);
   prows.sort((a,b)=>b.ft-a.ft);
-  const totP = {ct:0,or:0,vq:0,ft:0}; prows.forEach(x=>{totP.ct+=x.ct;totP.or+=x.or;totP.vq+=x.vq;totP.ft+=x.ft;});
+  const totP = {ct:0,or:0,vq:0,pd:0,ft:0}; prows.forEach(x=>{totP.ct+=x.ct;totP.or+=x.or;totP.vq+=x.vq;totP.pd+=x.pd;totP.ft+=x.ft;});
   document.querySelector('#tbl-loja-periodo tbody').innerHTML =
     prows.map(x=>`<tr>
       <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
       <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
+      <td class="num">${brl(x.pd)}</td><td class="num">${pct(x.or>0?x.pd/x.or:null)}</td>
       <td class="num">${brl(x.ft)}</td><td class="num">${pct(totFatP>0?x.ft/totFatP:0)}</td></tr>`).join('') +
     `<tr class="total-row"><td>TOTAL</td><td></td>
       <td class="num">${int(totP.ct)}</td><td class="num">${brl(totP.or)}</td><td class="num">${brl(totP.vq)}</td>
+      <td class="num">${brl(totP.pd)}</td><td class="num">${pct(totP.or>0?totP.pd/totP.or:null)}</td>
       <td class="num">${brl(totP.ft)}</td><td class="num">100,0%</td></tr>`;
 }
 
@@ -727,10 +750,11 @@ function buildWeeks(){
 function renderSemanal(){
   const weeks=buildWeeks();
   document.querySelector('#tbl-semanal tbody').innerHTML = weeks.map(w=>{
-    const meta=metaRange(w.a,w.b), real=somaLanc('ft',w.a,w.b), dif=real-meta, p=meta>0?real/meta:null;
+    const meta=metaRange(w.a,w.b), real=somaLanc('ft',w.a,w.b), perd=somaLanc('pd',w.a,w.b), dif=real-meta, p=meta>0?real/meta:null;
     return `<tr>
       <td>${w.num}</td><td>${w.label}</td>
       <td class="num">${brl(meta)}</td><td class="num">${brl(real)}</td>
+      <td class="num">${brl(perd)}</td>
       <td class="num" style="color:${dif<0?'var(--erro)':'var(--verde)'}">${brl(dif)}</td>
       <td class="num">${pct(p)}</td></tr>`;
   }).join('');
@@ -752,17 +776,17 @@ function renderMensal(){
     dt=new Date(dt.getFullYear(),dt.getMonth()+1,1);
   }
   const r=refDate(); const f=feriadoSet();
-  let tMeta=0,tReal=0;
+  let tMeta=0,tReal=0,tPerd=0;
   const body = meses.map(m=>{
-    const meta=metaRange(m.a,m.b), real=somaLanc('ft',m.a,m.b), dif=real-meta, p=meta>0?real/meta:null;
-    tMeta+=meta; tReal+=real;
+    const meta=metaRange(m.a,m.b), real=somaLanc('ft',m.a,m.b), perd=somaLanc('pd',m.a,m.b), dif=real-meta, p=meta>0?real/meta:null;
+    tMeta+=meta; tReal+=real; tPerd+=perd;
     // dias úteis restantes: se o mês é o de referência, conta após a data ref; se futuro, mês inteiro; se passado, 0
     let duRest=0; const start = (r>=m.a && r<=m.b) ? iso(addDays(D(r),1)) : (r<m.a ? m.a : iso(addDays(D(m.b),1)));
     if(start<=m.b) eachDate(start, m.b, (x)=>{ if(isDiaUtil(x,f)) duRest++; });
     const metaNec = duRest>0 ? Math.max(meta-real,0)/duRest : 0;
     return `<tr>
       <td>${m.label}</td>
-      <td class="num">${brl0(meta)}</td><td class="num">${brl(real)}</td>
+      <td class="num">${brl0(meta)}</td><td class="num">${brl(real)}</td><td class="num">${brl(perd)}</td>
       <td class="num" style="color:${dif<0?'var(--erro)':'var(--verde)'}">${brl(dif)}</td>
       <td class="num">${pct(p)}</td>
       <td class="num">${duRest>0?int(duRest):'—'}</td>
@@ -771,7 +795,7 @@ function renderMensal(){
   const tDif=tReal-tMeta, tp=tMeta>0?tReal/tMeta:null;
   document.querySelector('#tbl-mensal tbody').innerHTML = body +
     `<tr class="total-row"><td>TOTAL PERÍODO</td>
-      <td class="num">${brl0(tMeta)}</td><td class="num">${brl(tReal)}</td>
+      <td class="num">${brl0(tMeta)}</td><td class="num">${brl(tReal)}</td><td class="num">${brl(tPerd)}</td>
       <td class="num">${brl(tDif)}</td><td class="num">${pct(tp)}</td><td></td><td></td></tr>`;
 }
 
@@ -861,11 +885,11 @@ function download(name, content, type){
   a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),500);
 }
 document.getElementById('btn-export-csv').addEventListener('click', ()=>{
-  let csv='Data;Loja;Regiao;Contatos;Orcamento;VendaQuente;Faturado\n';
+  let csv='Data;Loja;Regiao;Contatos;Orcamento;VendaQuente;OrcamentoPerdido;Faturado\n';
   const regMap={}; state.config.lojas.forEach(l=>regMap[l.nome]=l.regiao);
   Object.keys(state.lanc).sort().forEach(k=>{
     const [d,lj]=k.split('|'); const v=state.lanc[k];
-    csv+=`${d};${lj};${regMap[lj]||''};${v.ct||0};${(v.or||0).toFixed(2)};${(v.vq||0).toFixed(2)};${(v.ft||0).toFixed(2)}\n`;
+    csv+=`${d};${lj};${regMap[lj]||''};${v.ct||0};${(v.or||0).toFixed(2)};${(v.vq||0).toFixed(2)};${(v.pd||0).toFixed(2)};${(v.ft||0).toFixed(2)}\n`;
   });
   download('lancamentos_faturamento.csv', csv, 'text/csv;charset=utf-8');
   toast('CSV exportado.');
@@ -1048,12 +1072,12 @@ function refreshLancGridPreserveFocus(){
   const d=document.getElementById('lanc-data').value; if(!d) return;
   const foco=document.activeElement;
   document.querySelectorAll('#tbl-lanc tbody tr[data-loja]').forEach(tr=>{
-    const k=d+'|'+tr.dataset.loja; const v=state.lanc[k]||{ct:0,or:0,vq:0,ft:0};
+    const k=d+'|'+tr.dataset.loja; const v=state.lanc[k]||{ct:0,or:0,vq:0,pd:0,ft:0};
     tr.querySelectorAll('input[data-f]').forEach(inp=>{ if(inp!==foco) inp.value=v[inp.dataset.f]||0; });
   });
   const tr=document.querySelector('#tbl-lanc tbody tr.total-row');
   if(tr){ tr.children[2].textContent=int(somaLanc('ct',d,d)); tr.children[3].textContent=brl(somaLanc('or',d,d));
-    tr.children[4].textContent=brl(somaLanc('vq',d,d)); tr.children[5].textContent=brl(somaLanc('ft',d,d)); }
+    tr.children[4].textContent=brl(somaLanc('vq',d,d)); tr.children[5].textContent=brl(somaLanc('pd',d,d)); tr.children[6].textContent=brl(somaLanc('ft',d,d)); }
 }
 function renderRemoto(){
   renderPainel(); renderLoja(); renderSemanal(); renderMensal();
