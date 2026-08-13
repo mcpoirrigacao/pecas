@@ -145,6 +145,20 @@ function loadMsal(){
   .miniprog > i{position:absolute;left:0;top:0;bottom:0;background:var(--azul-claro);opacity:.85;}
   .miniprog > b{position:absolute;left:6px;top:0;bottom:0;display:flex;align-items:center;font-size:.68rem;font-family:var(--fonte-dado);color:var(--texto);font-weight:700;}
 
+  .funnel-bar{position:relative;height:18px;background:var(--areia-escura);border-radius:3px;min-width:130px;overflow:hidden;}
+  .funnel-bar > span{position:absolute;top:0;bottom:0;}
+  .funnel-bar > .fb-vq{left:0;background:#cf9b3e;opacity:.85;}
+  .funnel-bar > .fb-ft{left:0;background:var(--azul-claro);}
+  .funnel-bar > .fb-pd{background:var(--erro);opacity:.8;}
+  .fb-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:.7rem;color:var(--texto-suave);margin:2px 0 10px;}
+  .fb-legend span{display:inline-flex;align-items:center;gap:5px;}
+  .fb-chip{width:12px;height:12px;border-radius:2px;display:inline-block;}
+  .fb-chip.vq{background:#cf9b3e;} .fb-chip.ft{background:var(--azul-claro);} .fb-chip.pd{background:var(--erro);}
+  .fb-chip.orc{background:var(--areia-escura);border:1px solid var(--borda);}
+  table.dt tr.alerta-funil td{background:#fbeee6;}
+  table.dt tr.alerta-funil td:first-child{box-shadow:inset 3px 0 0 var(--ferrugem);}
+  .warn-ico{color:var(--ferrugem);font-weight:700;margin-left:5px;cursor:help;}
+
   .btn{border:none;border-radius:5px;padding:9px 16px;font-size:.85rem;font-weight:700;cursor:pointer;letter-spacing:.2px;transition:transform .08s, filter .12s;}
   .btn:active{transform:scale(.97);}
   .btn.primary{background:var(--ferrugem);color:#fff;}
@@ -238,11 +252,18 @@ function loadMsal(){
     <div class="card" style="margin-top:18px;">
       <h3>Lojas — Mês Atual <span class="h3-side" id="funil-mes-label">funil do mês</span></h3>
       <div class="totals-strip" id="strip-funil-mes"></div>
+      <div class="fb-legend">
+        <span><i class="fb-chip orc"></i> Orçamento (barra cheia)</span>
+        <span><i class="fb-chip vq"></i> Venda quente</span>
+        <span><i class="fb-chip ft"></i> Faturado</span>
+        <span><i class="fb-chip pd"></i> Perdido</span>
+      </div>
       <div class="tablewrap">
         <table class="dt" id="tbl-ranking">
           <thead><tr>
             <th>Loja</th><th>Região</th>
             <th class="r">Contatos</th><th class="r">Orçamento</th><th class="r">Venda Quente</th><th class="r">Perdido</th>
+            <th>Funil</th>
             <th class="r">Faturado no Mês</th><th class="r">% do Total</th><th class="r">Meta do Mês</th><th>% Atingido</th>
           </tr></thead>
           <tbody></tbody>
@@ -625,18 +646,33 @@ function renderPainel(){
     tbox('Conversão (Fat./Orç.)', pct(mConv), null, {accent:true});
 
   rows.sort((a,b)=>b.ft-a.ft);
+  const LIMITE_PERDA=0.40; // acima disso, a loja é sinalizada
   const tb = document.querySelector('#tbl-ranking tbody');
   tb.innerHTML = rows.map(x=>{
     const share = totalFatMes>0 ? x.ft/totalFatMes : 0;
     const atg = x.metaMes>0 ? x.ft/x.metaMes : 0;
     const pw = Math.min(100, atg*100);
-    return `<tr>
-      <td>${escapeHtml(x.nome)}</td>
+    // barra do funil (proporções sobre o orçamento da loja no mês)
+    const base=x.or>0?x.or:0;
+    const wVq=base>0?Math.min(100,x.vq/base*100):0;
+    const wFt=base>0?Math.min(100,x.ft/base*100):0;
+    const wPd=base>0?Math.min(100,x.pd/base*100):0;
+    const barTitle=`Orçamento ${brl(x.or)} · Quente ${brl(x.vq)} · Faturado ${brl(x.ft)} · Perdido ${brl(x.pd)}`;
+    // destaque de saúde
+    const perda=x.or>0?x.pd/x.or:0;
+    const alertaPerda=x.or>0 && perda>LIMITE_PERDA;
+    const alertaFat=x.ft>x.vq+0.005;
+    const alerta=alertaPerda||alertaFat;
+    const motivos=[]; if(alertaPerda) motivos.push(`perda de ${pct(perda)} (acima de ${pct(LIMITE_PERDA)})`); if(alertaFat) motivos.push('faturado acima da venda quente');
+    const warn = alerta?`<span class="warn-ico" title="${motivos.join(' · ')}">⚠</span>`:'';
+    return `<tr class="${alerta?'alerta-funil':''}">
+      <td>${escapeHtml(x.nome)}${warn}</td>
       <td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
       <td class="num">${int(x.ct)}</td>
       <td class="num">${brl(x.or)}</td>
       <td class="num">${brl(x.vq)}</td>
       <td class="num">${brl(x.pd)}</td>
+      <td><div class="funnel-bar" title="${barTitle}"><span class="fb-vq" style="width:${wVq}%"></span><span class="fb-ft" style="width:${wFt}%"></span><span class="fb-pd" style="left:${100-wPd}%;width:${wPd}%"></span></div></td>
       <td class="num">${brl(x.ft)}</td>
       <td class="num">${pct(share)}</td>
       <td class="num">${brl0(x.metaMes)}</td>
