@@ -103,7 +103,9 @@ function loadMsal(){
   .field input:focus,.field textarea:focus{outline:2px solid var(--azul-claro);outline-offset:1px;}
   .field.readonly input{background:var(--areia-escura);color:var(--texto-suave);}
 
-  .totals-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:4px;margin-bottom:16px;}
+  .totals-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:4px;margin-bottom:16px;}
+  @media (max-width:900px){ .totals-strip{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (max-width:520px){ .totals-strip{grid-template-columns:1fr;} }
   .total-box{background:var(--azul-escuro);color:#fff;border-radius:6px;padding:12px 14px;}
   .total-box .label{font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#a9cfb2;}
   .total-box .value{font-family:var(--fonte-dado);font-size:1.15rem;font-weight:700;margin-top:3px;}
@@ -317,18 +319,19 @@ function loadMsal(){
       <table class="dt" id="tbl-loja-mes">
         <thead><tr>
           <th>Loja</th><th>Região</th><th class="r">Contatos</th><th class="r">Orçamento</th>
-          <th class="r">Venda Quente</th><th class="r">Perdido</th><th class="r">% Perda</th><th class="r">Faturado</th><th class="r">% do Faturado</th><th class="r">% da Meta</th>
+          <th class="r">Venda Quente</th><th class="r">Perdido</th><th class="r">% Perda</th><th class="r">Faturado</th><th class="r">Conversão</th><th class="r">% do Faturado</th><th class="r">% da Meta</th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
 
     <div class="block-title">Acumulado do Período (Agosto a Dezembro)</div>
+    <div class="note">“Em aberto” são saldos deduzidos: Orçamento em aberto = Orçamento − Venda Quente − Perdido; V.Q. em aberto = Venda Quente − Faturado. O ⚠ indica saldo negativo — uma etapa foi lançada sem a anterior (ex.: faturou algo que esquentou em outro período).</div>
     <div class="tablewrap">
       <table class="dt" id="tbl-loja-periodo">
         <thead><tr>
           <th>Loja</th><th>Região</th><th class="r">Contatos</th><th class="r">Orçamento</th>
-          <th class="r">Venda Quente</th><th class="r">Perdido</th><th class="r">% Perda</th><th class="r">Faturado</th><th class="r">% do Faturado</th>
+          <th class="r">Venda Quente</th><th class="r">Perdido</th><th class="r">% Perda</th><th class="r">Faturado</th><th class="r">Conversão</th><th class="r">% do Faturado</th><th class="r">Orç. em Aberto</th><th class="r">V.Q. em Aberto</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -607,16 +610,18 @@ function renderPainel(){
 
   // FUNIL
   const ct=somaLanc('ct'), orc=somaLanc('or'), vq=somaLanc('vq'), pd=somaLanc('pd');
-  const orcAberto=Math.max(orc-vq-pd,0);          // orçamentos que não esquentaram nem se perderam
-  const vqAberto=Math.max(vq-realP,0);            // venda quente ainda não faturada
+  const orcRaw=orc-vq-pd, vqRaw=vq-realP;
+  const orcAberto=Math.max(orcRaw,0);             // orçamento − venda quente − perdido
+  const vqAberto=Math.max(vqRaw,0);               // venda quente − faturado
+  const wOrc=orcRaw<-0.005?' ⚠':'', wVq=vqRaw<-0.005?' ⚠':'';
   const convOQ=orc>0?vq/orc:null;                 // orçamento → quente
   const convQF=vq>0?realP/vq:null;                // quente → faturado
   const taxaPerda=orc>0?pd/orc:null;              // % de perda sobre orçamento
   const convTotal=orc>0?realP/orc:null;           // funil completo
   document.getElementById('strip-funil').innerHTML =
     tbox('Contatos', int(ct)) +
-    tbox('Orçamento (total)', brl0(orc), `em aberto: ${brl0(orcAberto)}`, {sm:true}) +
-    tbox('Venda Quente (total)', brl0(vq), `em aberto: ${brl0(vqAberto)}`, {sm:true}) +
+    tbox('Orçamento (total)', brl0(orc), `em aberto: ${brl0(orcAberto)}${wOrc}`, {sm:true}) +
+    tbox('Venda Quente (total)', brl0(vq), `em aberto: ${brl0(vqAberto)}${wVq}`, {sm:true}) +
     tbox('Orçamento Perdido', brl0(pd), `taxa de perda: ${pct(taxaPerda)}`, {sm:true, accent:true}) +
     tbox('Conversão Orç.→Quente', pct(convOQ)) +
     tbox('Conversão Quente→Fat.', pct(convQF)) +
@@ -762,12 +767,13 @@ function renderLoja(){
       <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
       <td class="num">${brl(x.pd)}</td><td class="num">${pct(x.or>0?x.pd/x.or:null)}</td>
       <td class="num">${brl(x.ft)}</td>
+      <td class="num">${pct(x.or>0?x.ft/x.or:null)}</td>
       <td class="num">${pct(totFatM>0?x.ft/totFatM:0)}</td>
       <td class="num">${pct(metaMesLoja>0?x.ft/metaMesLoja:null)}</td></tr>`).join('') +
     `<tr class="total-row"><td>TOTAL</td><td></td>
       <td class="num">${int(totM.ct)}</td><td class="num">${brl(totM.or)}</td><td class="num">${brl(totM.vq)}</td>
       <td class="num">${brl(totM.pd)}</td><td class="num">${pct(totM.or>0?totM.pd/totM.or:null)}</td>
-      <td class="num">${brl(totM.ft)}</td><td class="num">100,0%</td>
+      <td class="num">${brl(totM.ft)}</td><td class="num">${pct(totM.or>0?totM.ft/totM.or:null)}</td><td class="num">100,0%</td>
       <td class="num">${pct(metaMesLoja*state.config.lojas.length>0?totM.ft/(metaMesLoja*state.config.lojas.length):null)}</td></tr>`;
 
   // PERÍODO
@@ -780,15 +786,23 @@ function renderLoja(){
   prows.sort((a,b)=>b.ft-a.ft);
   const totP = {ct:0,or:0,vq:0,pd:0,ft:0}; prows.forEach(x=>{totP.ct+=x.ct;totP.or+=x.or;totP.vq+=x.vq;totP.pd+=x.pd;totP.ft+=x.ft;});
   document.querySelector('#tbl-loja-periodo tbody').innerHTML =
-    prows.map(x=>`<tr>
+    prows.map(x=>{
+      const sOrc=x.or-x.vq-x.pd, sVq=x.vq-x.ft;
+      const aOrc=sOrc<-0.005?'<span class="warn-ico" title="Venda quente/perdido acima do orçamento lançado">⚠</span>':'';
+      const aVq=sVq<-0.005?'<span class="warn-ico" title="Faturado acima da venda quente lançada">⚠</span>':'';
+      return `<tr>
       <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
       <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
       <td class="num">${brl(x.pd)}</td><td class="num">${pct(x.or>0?x.pd/x.or:null)}</td>
-      <td class="num">${brl(x.ft)}</td><td class="num">${pct(totFatP>0?x.ft/totFatP:0)}</td></tr>`).join('') +
-    `<tr class="total-row"><td>TOTAL</td><td></td>
+      <td class="num">${brl(x.ft)}</td><td class="num">${pct(x.or>0?x.ft/x.or:null)}</td><td class="num">${pct(totFatP>0?x.ft/totFatP:0)}</td>
+      <td class="num">${brl(Math.max(sOrc,0))}${aOrc}</td><td class="num">${brl(Math.max(sVq,0))}${aVq}</td></tr>`;
+    }).join('') +
+    (()=>{ const tsOrc=totP.or-totP.vq-totP.pd, tsVq=totP.vq-totP.ft;
+      return `<tr class="total-row"><td>TOTAL</td><td></td>
       <td class="num">${int(totP.ct)}</td><td class="num">${brl(totP.or)}</td><td class="num">${brl(totP.vq)}</td>
       <td class="num">${brl(totP.pd)}</td><td class="num">${pct(totP.or>0?totP.pd/totP.or:null)}</td>
-      <td class="num">${brl(totP.ft)}</td><td class="num">100,0%</td></tr>`;
+      <td class="num">${brl(totP.ft)}</td><td class="num">${pct(totP.or>0?totP.ft/totP.or:null)}</td><td class="num">100,0%</td>
+      <td class="num">${brl(Math.max(tsOrc,0))}</td><td class="num">${brl(Math.max(tsVq,0))}</td></tr>`; })();
 }
 
 function buildWeeks(){
