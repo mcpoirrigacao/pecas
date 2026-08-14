@@ -912,6 +912,8 @@ document.getElementById('tabs').addEventListener('click', e=>{
   if(btn.dataset.tab==='parametros') renderParametros();
   if(btn.dataset.tab==='painel') renderPainel();
   if(btn.dataset.tab==='loja') renderLoja();
+  if(btn.dataset.tab==='semanal') renderSemanal();
+  if(btn.dataset.tab==='mensal') renderMensal();
 });
 
 document.getElementById('ref-data').addEventListener('change', ()=>{ renderPainel(); renderLoja(); renderMensal(); });
