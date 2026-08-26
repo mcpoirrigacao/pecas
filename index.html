@@ -314,6 +314,23 @@ function loadMsal(){
     <h2 class="pane-title">Resumo por Loja</h2>
     <p class="pane-desc" id="loja-desc">Mês atual e acumulado do período por loja.</p>
 
+    <div class="block-title">Intervalo Semanal</div>
+    <div class="card">
+      <div class="field" style="max-width:360px;margin:0;">
+        <label for="loja-semana">Semana</label>
+        <select id="loja-semana" style="border:1px solid var(--borda);border-radius:4px;padding:8px 9px;font-size:.92rem;background:#fffdf9;color:var(--texto);"></select>
+      </div>
+    </div>
+    <div class="tablewrap" style="margin-bottom:16px;">
+      <table class="dt" id="tbl-loja-semana">
+        <thead><tr>
+          <th>Loja</th><th>Região</th><th class="r">Contatos</th><th class="r">Orçamento</th>
+          <th class="r">Venda Quente</th><th class="r">Perdido</th><th class="r">% Perda</th><th class="r">Faturado</th><th class="r">Conversão</th><th class="r">% do Faturado</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
     <div class="block-title">Mês Atual</div>
     <div class="tablewrap">
       <table class="dt" id="tbl-loja-mes">
@@ -602,11 +619,15 @@ function renderPainel(){
 
   // PERÍODO
   const metaP=state.config.metaTotal, realP=somaLanc('ft'), faltaP=Math.max(metaP-realP,0), pctP=metaP>0?realP/metaP:null;
+  // meta recalculada a cada dia: falta total ÷ dias úteis restantes do período (após a data de referência)
+  let duRestP=0; eachDate(iso(addDays(D(r),1)), state.config.fim, (x)=>{ if(isDiaUtil(x,f)) duRestP++; });
+  const metaDiaPeriodo = duRestP>0 ? faltaP/duRestP : 0;
   document.getElementById('strip-periodo').innerHTML =
     tbox('Meta Total', brl0(metaP)) +
     tbox('Realizado', brl(realP), null, {barPct:pctP!=null?pctP*100:0}) +
     tbox('Falta para a Meta', brl0(faltaP), null, {accent:true}) +
-    tbox('% Atingido', pct(pctP));
+    tbox('% Atingido', pct(pctP)) +
+    tbox('Meta Diária p/ Fechar o Período', brl0(metaDiaPeriodo), `${duRestP} dia(s) útil(eis) restante(s) no período`, {sm:true});
 
   // FUNIL
   const ct=somaLanc('ct'), orc=somaLanc('or'), vq=somaLanc('vq'), pd=somaLanc('pd');
@@ -803,7 +824,44 @@ function renderLoja(){
       <td class="num">${brl(totP.pd)}</td><td class="num">${pct(totP.or>0?totP.pd/totP.or:null)}</td>
       <td class="num">${brl(totP.ft)}</td><td class="num">${pct(totP.or>0?totP.ft/totP.or:null)}</td><td class="num">100,0%</td>
       <td class="num">${brl(Math.max(tsOrc,0))}</td><td class="num">${brl(Math.max(tsVq,0))}</td></tr>`; })();
+
+  renderLojaSemanaControl();
 }
+
+let _lojaSemanaIdx=null;
+function renderLojaSemanaControl(){
+  const sel=document.getElementById('loja-semana'); if(!sel) return;
+  const weeks=buildWeeks();
+  if(_lojaSemanaIdx==null || _lojaSemanaIdx>=weeks.length){
+    const r=refDate(); _lojaSemanaIdx=weeks.findIndex(w=> r>=w.a && r<=w.b); if(_lojaSemanaIdx<0) _lojaSemanaIdx=0;
+  }
+  sel.innerHTML=weeks.map((w,i)=>`<option value="${i}">Semana ${w.num} · ${w.label}</option>`).join('');
+  sel.value=_lojaSemanaIdx;
+  renderLojaSemana(weeks[_lojaSemanaIdx]);
+}
+function renderLojaSemana(w){
+  const body=document.querySelector('#tbl-loja-semana tbody'); if(!body) return;
+  if(!w){ body.innerHTML=''; return; }
+  let rows=state.config.lojas.map(l=>({
+    nome:l.nome, regiao:l.regiao,
+    ct:somaLanc('ct',w.a,w.b,l.nome), or:somaLanc('or',w.a,w.b,l.nome),
+    vq:somaLanc('vq',w.a,w.b,l.nome), pd:somaLanc('pd',w.a,w.b,l.nome), ft:somaLanc('ft',w.a,w.b,l.nome)
+  }));
+  const totFat=rows.reduce((s,x)=>s+x.ft,0);
+  rows.sort((a,b)=>b.ft-a.ft);
+  const tot={ct:0,or:0,vq:0,pd:0,ft:0}; rows.forEach(x=>{tot.ct+=x.ct;tot.or+=x.or;tot.vq+=x.vq;tot.pd+=x.pd;tot.ft+=x.ft;});
+  body.innerHTML =
+    rows.map(x=>`<tr>
+      <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
+      <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
+      <td class="num">${brl(x.pd)}</td><td class="num">${pct(x.or>0?x.pd/x.or:null)}</td>
+      <td class="num">${brl(x.ft)}</td><td class="num">${pct(x.or>0?x.ft/x.or:null)}</td><td class="num">${pct(totFat>0?x.ft/totFat:0)}</td></tr>`).join('') +
+    `<tr class="total-row"><td>TOTAL</td><td></td>
+      <td class="num">${int(tot.ct)}</td><td class="num">${brl(tot.or)}</td><td class="num">${brl(tot.vq)}</td>
+      <td class="num">${brl(tot.pd)}</td><td class="num">${pct(tot.or>0?tot.pd/tot.or:null)}</td>
+      <td class="num">${brl(tot.ft)}</td><td class="num">${pct(tot.or>0?tot.ft/tot.or:null)}</td><td class="num">100,0%</td></tr>`;
+}
+document.getElementById('loja-semana').addEventListener('change', e=>{ _lojaSemanaIdx=+e.target.value; renderLojaSemana(buildWeeks()[_lojaSemanaIdx]); });
 
 function buildWeeks(){
   // agrupa datas do período em semanas (segunda a domingo), recortadas ao período
