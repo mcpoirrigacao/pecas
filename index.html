@@ -148,6 +148,19 @@ function loadMsal(){
   .miniprog > b{position:absolute;left:6px;top:0;bottom:0;display:flex;align-items:center;font-size:.68rem;font-family:var(--fonte-dado);color:var(--texto);font-weight:700;}
 
   .funnel-bar{position:relative;height:18px;background:var(--areia-escura);border-radius:3px;min-width:130px;overflow:hidden;}
+  .chart-box{width:100%;overflow-x:auto;}
+  .chart-svg{width:100%;height:auto;display:block;min-width:340px;}
+  .chart-svg .grid{stroke:var(--areia-escura);stroke-width:1;}
+  .chart-svg .axis{stroke:var(--borda);stroke-width:1;}
+  .chart-svg text{font-family:var(--fonte-corpo);fill:var(--texto-suave);}
+  .chart-svg text.ax{font-size:10px;}
+  .chart-svg text.ax.r{text-anchor:end;}
+  .chart-svg text.ax.c{text-anchor:middle;}
+  .chart-svg text.val{font-family:var(--fonte-dado);font-size:9.5px;fill:var(--texto);text-anchor:middle;}
+  .chart-svg .dot{stroke:#fff;stroke-width:1.5;}
+  .chart-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.74rem;color:var(--texto-suave);margin-bottom:8px;}
+  .chart-legend span{display:inline-flex;align-items:center;gap:6px;}
+  .chart-legend i{width:12px;height:12px;border-radius:2px;display:inline-block;}
   .funnel-bar > span{position:absolute;top:0;bottom:0;}
   .funnel-bar > .fb-vq{left:0;background:#cf9b3e;opacity:.85;}
   .funnel-bar > .fb-ft{left:0;background:var(--azul-claro);}
@@ -225,6 +238,7 @@ function loadMsal(){
     <button data-tab="loja">Resumo por Loja</button>
     <button data-tab="semanal">Resumo Semanal</button>
     <button data-tab="mensal">Resumo Mensal</button>
+    <button data-tab="graficos">📊 Gráficos</button>
     <button data-tab="parametros">⚙ Parâmetros</button>
   </nav>
 </header>
@@ -383,6 +397,19 @@ function loadMsal(){
         <tbody></tbody>
       </table>
     </div>
+  </section>
+
+  <!-- ============== GRÁFICOS ============== -->
+  <section class="pane" id="pane-graficos">
+    <h2 class="pane-title">Gráficos</h2>
+    <p class="pane-desc">Comparações visuais de faturamento. Passe o mouse sobre as barras/pontos para ver os valores.</p>
+    <div class="card"><h3>Faturamento Mês a Mês <span class="h3-side">meta × realizado</span></h3><div id="g-mensal" class="chart-box"></div></div>
+    <div class="card"><h3>Faturamento Semana a Semana <span class="h3-side">realizado × meta</span></h3><div id="g-semanal" class="chart-box"></div></div>
+    <div class="card"><h3>Realizado Acumulado × Meta Acumulada <span class="h3-side">está no ritmo?</span></h3><div id="g-acumulado" class="chart-box"></div></div>
+    <div class="card"><h3>Faturamento por Loja <span class="h3-side">acumulado do período</span></h3><div id="g-lojas" class="chart-box"></div></div>
+    <div class="card"><h3>Funil do Período <span class="h3-side">orçamento → quente → faturado</span></h3><div id="g-funil" class="chart-box"></div></div>
+    <div class="card"><h3>Conversão por Loja <span class="h3-side">faturado ÷ orçamento · período</span></h3><div id="g-conv" class="chart-box"></div></div>
+    <div class="card"><h3>Taxa de Perda por Mês <span class="h3-side">perdido ÷ orçamento</span></h3><div id="g-perda" class="chart-box"></div></div>
   </section>
 
   <!-- ============== PARÂMETROS ============== -->
@@ -951,10 +978,97 @@ function renderParametros(){
   document.querySelectorAll('[data-rem-loja]').forEach(b=>b.onclick=()=>{ state.config.lojas.splice(+b.dataset.remLoja,1); dirtyConfig.add('lojas'); save(); renderParametros(); });
 }
 
+/* =========================================================================
+   GRÁFICOS — SVG nativo (sem dependência externa), no tema do app
+   ========================================================================= */
+const COR={real:'#1f8c33', meta:'#cf9b3e', orc:'#0a7517', vq:'#cf9b3e', ft:'#1f8c33', pd:'#a3312a'};
+function niceMax(v){ if(v<=0) return 1; const p=Math.pow(10,Math.floor(Math.log10(v))); const nn=v/p; const s=nn<=1?1:nn<=2?2:nn<=5?5:10; return s*p; }
+function fmtK(v){ v=v||0; const a=Math.abs(v); if(a>=1e6) return 'R$'+(v/1e6).toLocaleString('pt-BR',{maximumFractionDigits:1})+'M'; if(a>=1e3) return 'R$'+(v/1e3).toLocaleString('pt-BR',{maximumFractionDigits:0})+'k'; return 'R$'+Math.round(v); }
+function legenda(series){ return `<div class="chart-legend">${series.map(s=>`<span><i style="background:${s.color}"></i>${escapeHtml(s.name)}</span>`).join('')}</div>`; }
+function chartBars(cats, series){
+  const W=760,H=300,pL=58,pR=14,pT=14,pB=46, iw=W-pL-pR, ih=H-pT-pB;
+  const max=niceMax(Math.max(1,...series.flatMap(s=>s.values)));
+  const gw=iw/Math.max(cats.length,1), bw=Math.min(34,(gw-6)/series.length);
+  let s=`<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">`;
+  for(let i=0;i<=4;i++){ const y=pT+ih-ih*i/4; s+=`<line class="grid" x1="${pL}" y1="${y}" x2="${W-pR}" y2="${y}"/><text class="ax r" x="${pL-6}" y="${y+3}">${fmtK(max*i/4)}</text>`; }
+  cats.forEach((c,gi)=>{ const gx=pL+gi*gw, x0=gx+(gw-bw*series.length)/2;
+    series.forEach((se,si)=>{ const v=se.values[gi]||0, bh=ih*Math.max(v,0)/max, x=x0+si*bw, y=pT+ih-bh;
+      s+=`<rect x="${x}" y="${y}" width="${Math.max(bw-3,1)}" height="${bh}" rx="2" fill="${se.color}"><title>${escapeHtml(c)} — ${escapeHtml(se.name)}: ${brl0(v)}</title></rect>`; });
+    s+=`<text class="ax c" x="${gx+gw/2}" y="${H-pB+16}">${escapeHtml(c)}</text>`; });
+  return legenda(series)+s+`</svg>`;
+}
+function chartLine(cats, series, opts){
+  opts=opts||{}; const fmtV=opts.fmt||fmtK, fmtT=opts.fmt||brl0;
+  const W=760,H=300,pL=58,pR=14,pT=14,pB=46, iw=W-pL-pR, ih=H-pT-pB;
+  const max=opts.max||niceMax(Math.max(1e-9,...series.flatMap(s=>s.values)));
+  const n=cats.length, dx=n>1?iw/(n-1):0, X=i=>pL+i*dx, Y=v=>pT+ih-ih*Math.max(v,0)/max;
+  let s=`<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">`;
+  for(let i=0;i<=4;i++){ const y=pT+ih-ih*i/4; s+=`<line class="grid" x1="${pL}" y1="${y}" x2="${W-pR}" y2="${y}"/><text class="ax r" x="${pL-6}" y="${y+3}">${fmtV(max*i/4)}</text>`; }
+  const stepLbl=Math.max(1,Math.ceil(n/12));
+  cats.forEach((c,i)=>{ if(i%stepLbl===0||i===n-1) s+=`<text class="ax c" x="${X(i)}" y="${H-pB+16}">${escapeHtml(c)}</text>`; });
+  series.forEach(se=>{ const pts=se.values.map((v,i)=>`${X(i)},${Y(v)}`).join(' ');
+    s+=`<polyline points="${pts}" fill="none" stroke="${se.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" ${se.dash?'stroke-dasharray="6 4"':''}/>`;
+    se.values.forEach((v,i)=> s+=`<circle class="dot" cx="${X(i)}" cy="${Y(v)}" r="3" fill="${se.color}"><title>${escapeHtml(cats[i])} — ${escapeHtml(se.name)}: ${fmtT(v)}</title></circle>`); });
+  return legenda(series)+s+`</svg>`;
+}
+function chartHBars(items, opts){
+  opts=opts||{}; const fmtV=opts.fmt||fmtK, fmtT=opts.fmt||brl0;
+  const rowH=26,pT=8,pB=8,pL=110,pR=70,W=760, H=Math.max(pT+pB+items.length*rowH,40), iw=W-pL-pR;
+  const max=opts.max||niceMax(Math.max(1e-9,...items.map(i=>i.value)));
+  let s=`<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">`;
+  items.forEach((it,i)=>{ const y=pT+i*rowH, bw=iw*Math.max(it.value,0)/max;
+    s+=`<text class="ax r" x="${pL-8}" y="${y+rowH/2+3}">${escapeHtml(it.label)}</text>`;
+    s+=`<rect x="${pL}" y="${y+4}" width="${Math.max(bw,0)}" height="${rowH-10}" rx="2" fill="${it.color||COR.real}"><title>${escapeHtml(it.label)}: ${fmtT(it.value)}</title></rect>`;
+    s+=`<text class="val" x="${pL+Math.max(bw,0)+5}" y="${y+rowH/2+3}" style="text-anchor:start">${fmtV(it.value)}</text>`; });
+  return s+`</svg>`;
+}
+function fmtPct(v){ return (Math.max(v,0)*100).toLocaleString('pt-BR',{maximumFractionDigits:0})+'%'; }
+function mesesDoPeriodo(){
+  const meses=[]; let dt=D(state.config.inicio); const end=D(state.config.fim); const seen=new Set();
+  const nomes=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  while(dt<=end){ const key=dt.getFullYear()+'-'+dt.getMonth();
+    if(!seen.has(key)){ seen.add(key); const first=new Date(dt.getFullYear(),dt.getMonth(),1), last=new Date(dt.getFullYear(),dt.getMonth()+1,0);
+      meses.push({label:nomes[dt.getMonth()], a:iso(first)<state.config.inicio?state.config.inicio:iso(first), b:iso(last)>state.config.fim?state.config.fim:iso(last)}); }
+    dt=new Date(dt.getFullYear(),dt.getMonth()+1,1); }
+  return meses;
+}
+function renderGraficos(){
+  const meses=mesesDoPeriodo(), weeks=buildWeeks();
+  document.getElementById('g-mensal').innerHTML = chartBars(meses.map(m=>m.label),
+    [ {name:'Realizado', color:COR.real, values:meses.map(m=>somaLanc('ft',m.a,m.b))},
+      {name:'Meta', color:COR.meta, values:meses.map(m=>metaRange(m.a,m.b))} ]);
+  document.getElementById('g-semanal').innerHTML = chartLine(weeks.map(w=>'S'+w.num),
+    [ {name:'Realizado', color:COR.real, values:weeks.map(w=>somaLanc('ft',w.a,w.b))},
+      {name:'Meta', color:COR.meta, dash:true, values:weeks.map(w=>metaRange(w.a,w.b))} ]);
+  let accR=0,accM=0; const aR=[],aM=[];
+  weeks.forEach(w=>{ accR+=somaLanc('ft',w.a,w.b); accM+=metaRange(w.a,w.b); aR.push(accR); aM.push(accM); });
+  document.getElementById('g-acumulado').innerHTML = chartLine(weeks.map(w=>'S'+w.num),
+    [ {name:'Realizado acum.', color:COR.real, values:aR},
+      {name:'Meta acum.', color:COR.meta, dash:true, values:aM} ]);
+  const lojas=state.config.lojas.map(l=>({label:l.nome, value:somaLanc('ft',null,null,l.nome)})).sort((a,b)=>b.value-a.value);
+  document.getElementById('g-lojas').innerHTML = chartHBars(lojas);
+  document.getElementById('g-funil').innerHTML = chartHBars([
+    {label:'Orçamento', value:somaLanc('or'), color:COR.orc},
+    {label:'Venda Quente', value:somaLanc('vq'), color:COR.vq},
+    {label:'Faturado', value:somaLanc('ft'), color:COR.ft},
+    {label:'Perdido', value:somaLanc('pd'), color:COR.pd},
+  ]);
+  // conversão por loja (Faturado ÷ Orçamento, período)
+  const conv=state.config.lojas.map(l=>{ const or=somaLanc('or',null,null,l.nome); return {label:l.nome, value:or>0?somaLanc('ft',null,null,l.nome)/or:0}; }).sort((a,b)=>b.value-a.value);
+  const maxConv=Math.max(1,...conv.map(c=>c.value));
+  document.getElementById('g-conv').innerHTML = chartHBars(conv, {fmt:fmtPct, max:maxConv});
+  // taxa de perda por mês (Perdido ÷ Orçamento)
+  const perda=meses.map(m=>{ const or=somaLanc('or',m.a,m.b); return or>0?somaLanc('pd',m.a,m.b)/or:0; });
+  const maxPerda=Math.max(...perda,0.001);
+  document.getElementById('g-perda').innerHTML = chartLine(meses.map(m=>m.label),
+    [ {name:'Taxa de perda', color:COR.pd, values:perda} ], {fmt:fmtPct, max:Math.min(1,niceMax(maxPerda))});
+}
+
 function renderAll(){
   renderPainel(); renderLoja(); renderSemanal(); renderMensal();
   const lp=document.getElementById('pane-lancamento'); if(lp.classList.contains('active')) renderLancamento();
   const pp=document.getElementById('pane-parametros'); if(pp.classList.contains('active')) renderParametros();
+  const gp=document.getElementById('pane-graficos'); if(gp.classList.contains('active')) renderGraficos();
 }
 
 /* =========================================================================
@@ -972,6 +1086,7 @@ document.getElementById('tabs').addEventListener('click', e=>{
   if(btn.dataset.tab==='loja') renderLoja();
   if(btn.dataset.tab==='semanal') renderSemanal();
   if(btn.dataset.tab==='mensal') renderMensal();
+  if(btn.dataset.tab==='graficos') renderGraficos();
 });
 
 document.getElementById('ref-data').addEventListener('change', ()=>{ renderPainel(); renderLoja(); renderMensal(); });
@@ -1243,6 +1358,7 @@ function renderRemoto(){
   renderPainel(); renderLoja(); renderSemanal(); renderMensal();
   if(document.getElementById('pane-lancamento').classList.contains('active')) refreshLancGridPreserveFocus();
   if(document.getElementById('pane-parametros').classList.contains('active')) renderParametros();
+  if(document.getElementById('pane-graficos').classList.contains('active')) renderGraficos();
 }
 
 /* ---------- carregar dados compartilhados ---------- */
