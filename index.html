@@ -594,7 +594,7 @@ function somaLanc(campo, aISO, bISO, loja){
 function refDate(){ return document.getElementById('ref-data').value || clampRef(iso(new Date())); }
 function clampRef(x){ if(x<state.config.inicio) return state.config.inicio; if(x>state.config.fim) return state.config.fim; return x; }
 function monthBounds(iso_){ const dt=D(iso_); const first=new Date(dt.getFullYear(),dt.getMonth(),1); const last=new Date(dt.getFullYear(),dt.getMonth()+1,0); return [iso(first),iso(last)]; }
-function weekBounds(iso_){ const dt=D(iso_); const mon=addDays(dt,-mondayIndex(dt)); const sun=addDays(mon,6); return [iso(mon),iso(sun)]; }
+function weekBounds(iso_){ const ini=D(state.config.inicio), fim=D(state.config.fim), dt=D(iso_); const base=dt<ini?ini:dt; const wStart=addDays(ini, Math.floor(Math.floor((base-ini)/86400000)/7)*7); let wEnd=addDays(wStart,6); if(wEnd>fim) wEnd=fim; return [iso(wStart), iso(wEnd)]; }
 
 /* =========================================================================
    RENDERIZAÇÃO
@@ -743,7 +743,7 @@ function renderLancamento(){
   ub.textContent = util?'Dia útil':'Não útil';
   ub.className = 'util '+(util?'sim':'nao');
   const dt=D(d);
-  document.getElementById('lanc-semana').textContent = `${DIAS_SEM[mondayIndex(dt)]} · Semana ${weeknum2(dt)}`;
+  document.getElementById('lanc-semana').textContent = `${DIAS_SEM[mondayIndex(dt)]} · Semana ${semanaSeqDe(d)}`;
 
   const tb = document.querySelector('#tbl-lanc tbody');
   tb.innerHTML = state.config.lojas.map(l=>{
@@ -891,19 +891,17 @@ function renderLojaSemana(w){
 document.getElementById('loja-semana').addEventListener('change', e=>{ _lojaSemanaIdx=+e.target.value; renderLojaSemana(buildWeeks()[_lojaSemanaIdx]); });
 
 function buildWeeks(){
-  // agrupa datas do período em semanas (segunda a domingo), recortadas ao período
-  const groups={};
-  const order=[];
-  eachDate(state.config.inicio, state.config.fim, (x,dt)=>{
-    const mon=iso(addDays(dt,-mondayIndex(dt)));
-    if(!groups[mon]){ groups[mon]={num:weeknum2(dt), datas:[]}; order.push(mon); }
-    groups[mon].datas.push(x);
-  });
-  return order.map(mon=>{
-    const g=groups[mon]; const a=g.datas[0], b=g.datas[g.datas.length-1];
-    return {num:g.num, a, b, label:`${ddmm(D(a))} a ${ddmm(D(b))}`};
-  });
+  // semanas sequenciais de 7 dias a partir do início do período (não quebram no mês)
+  const weeks=[]; const fim=D(state.config.fim); let start=D(state.config.inicio), num=1;
+  while(start<=fim){
+    let end=addDays(start,6); if(end>fim) end=fim;
+    weeks.push({ num, a:iso(start), b:iso(end), label:`${ddmm(start)} a ${ddmm(end)}` });
+    start=addDays(end,1); num++;
+  }
+  return weeks;
 }
+// número da semana sequencial que contém uma data (1 = primeira semana do período)
+function semanaSeqDe(iso_){ const ini=D(state.config.inicio), dt=D(iso_); if(dt<ini) return 1; return Math.floor(Math.floor((dt-ini)/86400000)/7)+1; }
 function renderSemanal(){
   const weeks=buildWeeks();
   document.querySelector('#tbl-semanal tbody').innerHTML = weeks.map(w=>{
