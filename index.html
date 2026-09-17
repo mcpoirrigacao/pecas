@@ -1160,22 +1160,47 @@ function updateLoginUI(){
   if(msAccount){ lbl.textContent='✓ '+(msAccount.name||msAccount.username); info.textContent='SharePoint › '+SP_PASTA; info.style.display='block'; }
   else{ lbl.textContent='🔑 Entrar com Microsoft'; info.style.display='none'; }
 }
+function resetAuthState(){
+  msAccount=null;
+  cloudEtag=null; acessoEtag=null;
+  acesso={ emailsAutorizados:[], emailsComuns:[] };
+  try{ dirtyLanc.clear(); dirtyConfig.clear(); }catch(e){}
+  salvando=false; pendente=false;
+  clearInterval(_pollTimer); clearTimeout(_saveTimer);
+  setSyncStatus('','');
+}
+async function fazerLogout(){
+  const inst=msalInstance;
+  resetAuthState();
+  updateLoginUI(); applyAccess();
+  // Logout LOCAL: encerra a sessão do app sem sair de toda a conta Microsoft.
+  // Assim o próximo login abre o seletor de contas e permite trocar de usuário.
+  if(inst){
+    try{ if(inst.clearCache) await inst.clearCache(); }catch(e){}
+    try{ inst.setActiveAccount(null); }catch(e){}
+  }
+  toast('Sessão encerrada.');
+}
 document.getElementById('btn-ms-login').addEventListener('click', async ()=>{
   if(!msalInstance){ toast('Autenticação ainda inicializando — aguarde e tente de novo.'); return; }
   if(msAccount){
-    if(confirm('Sair de '+msAccount.username+'?')){ try{ await msalInstance.logoutPopup({account:msAccount}); }catch(e){} msAccount=null; updateLoginUI(); applyAccess(); }
+    if(confirm('Sair de '+msAccount.username+'?')) await fazerLogout();
     return;
   }
   try{
     document.getElementById('ms-login-label').textContent='⏳ Abrindo login...';
-    const resp=await msalInstance.loginPopup({scopes:GRAPH_SCOPES});
-    msAccount=resp.account; updateLoginUI();
+    // prompt:'select_account' garante o seletor de contas ao logar de novo
+    const resp=await msalInstance.loginPopup({ scopes:GRAPH_SCOPES, prompt:'select_account' });
+    msAccount=resp.account;
+    try{ msalInstance.setActiveAccount(msAccount); }catch(e){}
+    updateLoginUI();
     await sincronizarNuvem(true); applyAccess(); renderAll();
     toast('Logado como '+msAccount.username);
   }catch(e){
     document.getElementById('ms-login-label').textContent='🔑 Entrar com Microsoft';
     if((e.message||'').includes('popup')||e.errorCode==='popup_window_error') toast('Popup bloqueado — libere popups para este site.');
     else if(e.errorCode==='user_cancelled') toast('Login cancelado.');
+    else if(e.errorCode==='interaction_in_progress') toast('Já há um login em andamento — recarregue a página se travar.');
     else toast('Erro no login: '+(e.errorCode||e.message||'desconhecido'));
   }
 });
