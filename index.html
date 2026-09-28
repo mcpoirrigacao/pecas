@@ -307,7 +307,7 @@ function loadMsal(){
           <thead><tr>
             <th>Loja</th><th>Região</th>
             <th class="r">Contatos</th><th class="r">Orçamento (R$)</th>
-            <th class="r">Venda Quente (R$)</th><th class="r">Orç. Perdido (R$)</th><th class="r">Faturado (R$)</th>
+            <th class="r">Venda Quente (R$)</th><th class="r">Orç. Perdido (R$)</th><th class="r">Faturado (R$)</th><th class="r">Devolução (R$)</th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -591,6 +591,8 @@ function somaLanc(campo, aISO, bISO, loja){
   }
   return s;
 }
+// faturado líquido = faturado bruto − devolução (usado como realizado/receita em todo o app)
+function fatLiq(aISO, bISO, loja){ return somaLanc('ft',aISO,bISO,loja) - somaLanc('dv',aISO,bISO,loja); }
 function refDate(){ return document.getElementById('ref-data').value || clampRef(iso(new Date())); }
 function clampRef(x){ if(x<state.config.inicio) return state.config.inicio; if(x>state.config.fim) return state.config.fim; return x; }
 function monthBounds(iso_){ const dt=D(iso_); const first=new Date(dt.getFullYear(),dt.getMonth(),1); const last=new Date(dt.getFullYear(),dt.getMonth()+1,0); return [iso(first),iso(last)]; }
@@ -613,7 +615,7 @@ function renderPainel(){
     `Referência: ${ddmm(D(r))}/${D(r).getFullYear()} · Meta total do período: ${brl0(state.config.metaTotal)}`;
 
   // HOJE
-  const metaH=metaDoDia(r), realH=somaLanc('ft',r,r), faltaH=Math.max(metaH-realH,0), pctH=metaH>0?realH/metaH:null;
+  const metaH=metaDoDia(r), realH=fatLiq(r,r), faltaH=Math.max(metaH-realH,0), pctH=metaH>0?realH/metaH:null;
   document.getElementById('strip-hoje').innerHTML =
     tbox('Meta do Dia', brl(metaH)) +
     tbox('Faturado Hoje', brl(realH), null, {barPct:pctH!=null?pctH*100:0}) +
@@ -623,7 +625,7 @@ function renderPainel(){
   // SEMANA
   const [wa,wb]=weekBounds(r);
   const wA=wa<state.config.inicio?state.config.inicio:wa, wB=wb>state.config.fim?state.config.fim:wb;
-  const metaW=metaRange(wA,wB), realW=somaLanc('ft',wA,wB), faltaW=Math.max(metaW-realW,0), pctW=metaW>0?realW/metaW:null;
+  const metaW=metaRange(wA,wB), realW=fatLiq(wA,wB), faltaW=Math.max(metaW-realW,0), pctW=metaW>0?realW/metaW:null;
   document.getElementById('strip-semana').innerHTML =
     tbox('Meta da Semana', brl(metaW), `${ddmm(D(wA))} a ${ddmm(D(wB))}`) +
     tbox('Realizado', brl(realW), null, {barPct:pctW!=null?pctW*100:0}) +
@@ -633,7 +635,7 @@ function renderPainel(){
   // MÊS
   const [ma,mb]=monthBounds(r);
   const mA=ma<state.config.inicio?state.config.inicio:ma, mB=mb>state.config.fim?state.config.fim:mb;
-  const metaM=metaRange(mA,mB), realM=somaLanc('ft',mA,mB), faltaM=Math.max(metaM-realM,0), pctM=metaM>0?realM/metaM:null;
+  const metaM=metaRange(mA,mB), realM=fatLiq(mA,mB), faltaM=Math.max(metaM-realM,0), pctM=metaM>0?realM/metaM:null;
   // dias úteis restantes no mês (após a referência)
   const f=feriadoSet(); let duRest=0; eachDate(iso(addDays(D(r),1)), mB, (x)=>{ if(isDiaUtil(x,f)) duRest++; });
   const metaDiaNec = duRest>0 ? faltaM/duRest : 0;
@@ -645,7 +647,7 @@ function renderPainel(){
     tbox('Meta Diária p/ Fechar', brl0(metaDiaNec), `${duRest} dia(s) útil(eis) restante(s)`, {sm:true});
 
   // PERÍODO
-  const metaP=state.config.metaTotal, realP=somaLanc('ft'), faltaP=Math.max(metaP-realP,0), pctP=metaP>0?realP/metaP:null;
+  const metaP=state.config.metaTotal, realP=fatLiq(), faltaP=Math.max(metaP-realP,0), pctP=metaP>0?realP/metaP:null;
   // meta recalculada a cada dia: falta total ÷ dias úteis restantes do período (após a data de referência)
   let duRestP=0; eachDate(iso(addDays(D(r),1)), state.config.fim, (x)=>{ if(isDiaUtil(x,f)) duRestP++; });
   const metaDiaPeriodo = duRestP>0 ? faltaP/duRestP : 0;
@@ -658,7 +660,7 @@ function renderPainel(){
 
   // FUNIL
   const ct=somaLanc('ct'), orc=somaLanc('or'), vq=somaLanc('vq'), pd=somaLanc('pd');
-  const orcRaw=orc-vq-pd, vqRaw=vq-realP;
+  const orcRaw=orc-vq-pd, vqRaw=vq-somaLanc('ft');
   const orcAberto=Math.max(orcRaw,0);             // orçamento − venda quente − perdido
   const vqAberto=Math.max(vqRaw,0);               // venda quente − faturado
   const wOrc=orcRaw<-0.005?' ⚠':'', wVq=vqRaw<-0.005?' ⚠':'';
@@ -682,7 +684,7 @@ function renderPainel(){
   const rows = state.config.lojas.map(l=>({
     nome:l.nome, regiao:l.regiao,
     ct:somaLanc('ct',mA,mB,l.nome), or:somaLanc('or',mA,mB,l.nome),
-    vq:somaLanc('vq',mA,mB,l.nome), pd:somaLanc('pd',mA,mB,l.nome), ft:somaLanc('ft',mA,mB,l.nome),
+    vq:somaLanc('vq',mA,mB,l.nome), pd:somaLanc('pd',mA,mB,l.nome), ft:fatLiq(mA,mB,l.nome),
     metaMes:metaMesLoja
   }));
   const totalFatMes = rows.reduce((s,x)=>s+x.ft,0);
@@ -747,7 +749,7 @@ function renderLancamento(){
 
   const tb = document.querySelector('#tbl-lanc tbody');
   tb.innerHTML = state.config.lojas.map(l=>{
-    const k=d+'|'+l.nome; const v=state.lanc[k]||{ct:0,or:0,vq:0,pd:0,ft:0};
+    const k=d+'|'+l.nome; const v=state.lanc[k]||{ct:0,or:0,vq:0,pd:0,ft:0,dv:0};
     // aviso: faturado acumulado da loja não deveria passar da venda quente acumulada
     const vqAc=somaLanc('vq',null,null,l.nome), ftAc=somaLanc('ft',null,null,l.nome);
     const alerta = ftAc>vqAc+0.005;
@@ -759,12 +761,13 @@ function renderLancamento(){
       <td><input type="number" step="0.01" min="0" data-f="vq" value="${v.vq||0}"></td>
       <td><input type="number" step="0.01" min="0" data-f="pd" value="${v.pd||0}"></td>
       <td><input type="number" step="0.01" min="0" data-f="ft" value="${v.ft||0}" class="${alerta?'ft-alerta':''}" title="${alerta?'Faturado acumulado acima da venda quente acumulada desta loja':''}"></td>
+      <td><input type="number" step="0.01" min="0" data-f="dv" value="${v.dv||0}"></td>
     </tr>`;
   }).join('') + (()=> {
-    const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tpd=somaLanc('pd',d,d), tft=somaLanc('ft',d,d);
+    const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tpd=somaLanc('pd',d,d), tft=somaLanc('ft',d,d), tdv=somaLanc('dv',d,d);
     return `<tr class="total-row"><td>TOTAL DO DIA</td><td></td>
       <td class="num">${int(tct)}</td><td class="num">${brl(tor)}</td>
-      <td class="num">${brl(tvq)}</td><td class="num">${brl(tpd)}</td><td class="num">${brl(tft)}</td></tr>`;
+      <td class="num">${brl(tvq)}</td><td class="num">${brl(tpd)}</td><td class="num">${brl(tft)}</td><td class="num">${brl(tdv)}</td></tr>`;
   })();
 
   tb.querySelectorAll('input[type=number]').forEach(inp=>{
@@ -772,15 +775,15 @@ function renderLancamento(){
       const loja = inp.closest('tr').dataset.loja;
       const campo = inp.dataset.f;
       const k = d+'|'+loja;
-      if(!state.lanc[k]) state.lanc[k]={ct:0,or:0,vq:0,pd:0,ft:0};
+      if(!state.lanc[k]) state.lanc[k]={ct:0,or:0,vq:0,pd:0,ft:0,dv:0};
       state.lanc[k][campo] = n(inp.value);
       dirtyLanc.add(k);
       save();
       // atualiza a linha de total e o aviso da loja sem redesenhar tudo (evita perder foco)
       const tr = document.querySelector('#tbl-lanc tbody tr.total-row');
-      if(tr){ const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tpd=somaLanc('pd',d,d), tft=somaLanc('ft',d,d);
+      if(tr){ const tct=somaLanc('ct',d,d), tor=somaLanc('or',d,d), tvq=somaLanc('vq',d,d), tpd=somaLanc('pd',d,d), tft=somaLanc('ft',d,d), tdv=somaLanc('dv',d,d);
         tr.children[2].textContent=int(tct); tr.children[3].textContent=brl(tor);
-        tr.children[4].textContent=brl(tvq); tr.children[5].textContent=brl(tpd); tr.children[6].textContent=brl(tft); }
+        tr.children[4].textContent=brl(tvq); tr.children[5].textContent=brl(tpd); tr.children[6].textContent=brl(tft); tr.children[7].textContent=brl(tdv); }
       if(campo==='vq'||campo==='ft'){
         const vqAc=somaLanc('vq',null,null,loja), ftAc=somaLanc('ft',null,null,loja), al=ftAc>vqAc+0.005;
         const ftInp=inp.closest('tr').querySelector('input[data-f="ft"]');
@@ -804,52 +807,52 @@ function renderLoja(){
   let mrows = state.config.lojas.map(l=>({
     nome:l.nome, regiao:l.regiao,
     ct:somaLanc('ct',mA,mB,l.nome), or:somaLanc('or',mA,mB,l.nome),
-    vq:somaLanc('vq',mA,mB,l.nome), pd:somaLanc('pd',mA,mB,l.nome), ft:somaLanc('ft',mA,mB,l.nome)
+    vq:somaLanc('vq',mA,mB,l.nome), pd:somaLanc('pd',mA,mB,l.nome), ft:somaLanc('ft',mA,mB,l.nome), dv:somaLanc('dv',mA,mB,l.nome)
   }));
-  const totFatM = mrows.reduce((s,x)=>s+x.ft,0);
-  mrows.sort((a,b)=>b.ft-a.ft);
-  const totM = {ct:0,or:0,vq:0,pd:0,ft:0}; mrows.forEach(x=>{totM.ct+=x.ct;totM.or+=x.or;totM.vq+=x.vq;totM.pd+=x.pd;totM.ft+=x.ft;});
+  const totFatM = mrows.reduce((s,x)=>s+(x.ft-x.dv),0);
+  mrows.sort((a,b)=>(b.ft-b.dv)-(a.ft-a.dv));
+  const totM = {ct:0,or:0,vq:0,pd:0,ft:0,dv:0}; mrows.forEach(x=>{totM.ct+=x.ct;totM.or+=x.or;totM.vq+=x.vq;totM.pd+=x.pd;totM.ft+=x.ft;totM.dv+=x.dv;});
   document.querySelector('#tbl-loja-mes tbody').innerHTML =
-    mrows.map(x=>`<tr>
+    mrows.map(x=>{ const fl=x.ft-x.dv; return `<tr>
       <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
       <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
       <td class="num">${brl(x.pd)}</td><td class="num">${pct(x.or>0?x.pd/x.or:null)}</td>
-      <td class="num">${brl(x.ft)}</td>
-      <td class="num">${pct(x.or>0?x.ft/x.or:null)}</td>
-      <td class="num">${pct(totFatM>0?x.ft/totFatM:0)}</td>
-      <td class="num">${pct(metaMesLoja>0?x.ft/metaMesLoja:null)}</td></tr>`).join('') +
-    `<tr class="total-row"><td>TOTAL</td><td></td>
+      <td class="num">${brl(fl)}${x.dv>0.005?` <span style="color:var(--texto-suave);font-size:.8em">(−${brl0(x.dv)})</span>`:''}</td>
+      <td class="num">${pct(x.or>0?fl/x.or:null)}</td>
+      <td class="num">${pct(totFatM>0?fl/totFatM:0)}</td>
+      <td class="num">${pct(metaMesLoja>0?fl/metaMesLoja:null)}</td></tr>`; }).join('') +
+    (()=>{ const flT=totM.ft-totM.dv; return `<tr class="total-row"><td>TOTAL</td><td></td>
       <td class="num">${int(totM.ct)}</td><td class="num">${brl(totM.or)}</td><td class="num">${brl(totM.vq)}</td>
       <td class="num">${brl(totM.pd)}</td><td class="num">${pct(totM.or>0?totM.pd/totM.or:null)}</td>
-      <td class="num">${brl(totM.ft)}</td><td class="num">${pct(totM.or>0?totM.ft/totM.or:null)}</td><td class="num">100,0%</td>
-      <td class="num">${pct(metaMesLoja*state.config.lojas.length>0?totM.ft/(metaMesLoja*state.config.lojas.length):null)}</td></tr>`;
+      <td class="num">${brl(flT)}${totM.dv>0.005?` <span style="color:var(--texto-suave);font-size:.8em">(−${brl0(totM.dv)})</span>`:''}</td><td class="num">${pct(totM.or>0?flT/totM.or:null)}</td><td class="num">100,0%</td>
+      <td class="num">${pct(metaMesLoja*state.config.lojas.length>0?flT/(metaMesLoja*state.config.lojas.length):null)}</td></tr>`; })();
 
   // PERÍODO
   let prows = state.config.lojas.map(l=>({
     nome:l.nome, regiao:l.regiao,
     ct:somaLanc('ct',null,null,l.nome), or:somaLanc('or',null,null,l.nome),
-    vq:somaLanc('vq',null,null,l.nome), pd:somaLanc('pd',null,null,l.nome), ft:somaLanc('ft',null,null,l.nome)
+    vq:somaLanc('vq',null,null,l.nome), pd:somaLanc('pd',null,null,l.nome), ft:somaLanc('ft',null,null,l.nome), dv:somaLanc('dv',null,null,l.nome)
   }));
-  const totFatP = prows.reduce((s,x)=>s+x.ft,0);
-  prows.sort((a,b)=>b.ft-a.ft);
-  const totP = {ct:0,or:0,vq:0,pd:0,ft:0}; prows.forEach(x=>{totP.ct+=x.ct;totP.or+=x.or;totP.vq+=x.vq;totP.pd+=x.pd;totP.ft+=x.ft;});
+  const totFatP = prows.reduce((s,x)=>s+(x.ft-x.dv),0);
+  prows.sort((a,b)=>(b.ft-b.dv)-(a.ft-a.dv));
+  const totP = {ct:0,or:0,vq:0,pd:0,ft:0,dv:0}; prows.forEach(x=>{totP.ct+=x.ct;totP.or+=x.or;totP.vq+=x.vq;totP.pd+=x.pd;totP.ft+=x.ft;totP.dv+=x.dv;});
   document.querySelector('#tbl-loja-periodo tbody').innerHTML =
     prows.map(x=>{
-      const sOrc=x.or-x.vq-x.pd, sVq=x.vq-x.ft;
+      const fl=x.ft-x.dv, sOrc=x.or-x.vq-x.pd, sVq=x.vq-x.ft;   // saldo V.Q. usa faturado bruto
       const aOrc=sOrc<-0.005?'<span class="warn-ico" title="Venda quente/perdido acima do orçamento lançado">⚠</span>':'';
       const aVq=sVq<-0.005?'<span class="warn-ico" title="Faturado acima da venda quente lançada">⚠</span>':'';
       return `<tr>
       <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
       <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
       <td class="num">${brl(x.pd)}</td><td class="num">${pct(x.or>0?x.pd/x.or:null)}</td>
-      <td class="num">${brl(x.ft)}</td><td class="num">${pct(x.or>0?x.ft/x.or:null)}</td><td class="num">${pct(totFatP>0?x.ft/totFatP:0)}</td>
+      <td class="num">${brl(fl)}${x.dv>0.005?` <span style="color:var(--texto-suave);font-size:.8em">(−${brl0(x.dv)})</span>`:''}</td><td class="num">${pct(x.or>0?fl/x.or:null)}</td><td class="num">${pct(totFatP>0?fl/totFatP:0)}</td>
       <td class="num">${brl(Math.max(sOrc,0))}${aOrc}</td><td class="num">${brl(Math.max(sVq,0))}${aVq}</td></tr>`;
     }).join('') +
-    (()=>{ const tsOrc=totP.or-totP.vq-totP.pd, tsVq=totP.vq-totP.ft;
+    (()=>{ const flT=totP.ft-totP.dv, tsOrc=totP.or-totP.vq-totP.pd, tsVq=totP.vq-totP.ft;
       return `<tr class="total-row"><td>TOTAL</td><td></td>
       <td class="num">${int(totP.ct)}</td><td class="num">${brl(totP.or)}</td><td class="num">${brl(totP.vq)}</td>
       <td class="num">${brl(totP.pd)}</td><td class="num">${pct(totP.or>0?totP.pd/totP.or:null)}</td>
-      <td class="num">${brl(totP.ft)}</td><td class="num">${pct(totP.or>0?totP.ft/totP.or:null)}</td><td class="num">100,0%</td>
+      <td class="num">${brl(flT)}${totP.dv>0.005?` <span style="color:var(--texto-suave);font-size:.8em">(−${brl0(totP.dv)})</span>`:''}</td><td class="num">${pct(totP.or>0?flT/totP.or:null)}</td><td class="num">100,0%</td>
       <td class="num">${brl(Math.max(tsOrc,0))}</td><td class="num">${brl(Math.max(tsVq,0))}</td></tr>`; })();
 
   renderLojaSemanaControl();
@@ -872,21 +875,21 @@ function renderLojaSemana(w){
   let rows=state.config.lojas.map(l=>({
     nome:l.nome, regiao:l.regiao,
     ct:somaLanc('ct',w.a,w.b,l.nome), or:somaLanc('or',w.a,w.b,l.nome),
-    vq:somaLanc('vq',w.a,w.b,l.nome), pd:somaLanc('pd',w.a,w.b,l.nome), ft:somaLanc('ft',w.a,w.b,l.nome)
+    vq:somaLanc('vq',w.a,w.b,l.nome), pd:somaLanc('pd',w.a,w.b,l.nome), ft:somaLanc('ft',w.a,w.b,l.nome), dv:somaLanc('dv',w.a,w.b,l.nome)
   }));
-  const totFat=rows.reduce((s,x)=>s+x.ft,0);
-  rows.sort((a,b)=>b.ft-a.ft);
-  const tot={ct:0,or:0,vq:0,pd:0,ft:0}; rows.forEach(x=>{tot.ct+=x.ct;tot.or+=x.or;tot.vq+=x.vq;tot.pd+=x.pd;tot.ft+=x.ft;});
+  const totFat=rows.reduce((s,x)=>s+(x.ft-x.dv),0);
+  rows.sort((a,b)=>(b.ft-b.dv)-(a.ft-a.dv));
+  const tot={ct:0,or:0,vq:0,pd:0,ft:0,dv:0}; rows.forEach(x=>{tot.ct+=x.ct;tot.or+=x.or;tot.vq+=x.vq;tot.pd+=x.pd;tot.ft+=x.ft;tot.dv+=x.dv;});
   body.innerHTML =
-    rows.map(x=>`<tr>
+    rows.map(x=>{ const fl=x.ft-x.dv; return `<tr>
       <td>${escapeHtml(x.nome)}</td><td><span class="reg ${x.regiao}">${escapeHtml(x.regiao||'')}</span></td>
       <td class="num">${int(x.ct)}</td><td class="num">${brl(x.or)}</td><td class="num">${brl(x.vq)}</td>
       <td class="num">${brl(x.pd)}</td><td class="num">${pct(x.or>0?x.pd/x.or:null)}</td>
-      <td class="num">${brl(x.ft)}</td><td class="num">${pct(x.or>0?x.ft/x.or:null)}</td><td class="num">${pct(totFat>0?x.ft/totFat:0)}</td></tr>`).join('') +
-    `<tr class="total-row"><td>TOTAL</td><td></td>
+      <td class="num">${brl(fl)}${x.dv>0.005?` <span style="color:var(--texto-suave);font-size:.8em">(−${brl0(x.dv)})</span>`:''}</td><td class="num">${pct(x.or>0?fl/x.or:null)}</td><td class="num">${pct(totFat>0?fl/totFat:0)}</td></tr>`; }).join('') +
+    (()=>{ const flT=tot.ft-tot.dv; return `<tr class="total-row"><td>TOTAL</td><td></td>
       <td class="num">${int(tot.ct)}</td><td class="num">${brl(tot.or)}</td><td class="num">${brl(tot.vq)}</td>
       <td class="num">${brl(tot.pd)}</td><td class="num">${pct(tot.or>0?tot.pd/tot.or:null)}</td>
-      <td class="num">${brl(tot.ft)}</td><td class="num">${pct(tot.or>0?tot.ft/tot.or:null)}</td><td class="num">100,0%</td></tr>`;
+      <td class="num">${brl(flT)}${tot.dv>0.005?` <span style="color:var(--texto-suave);font-size:.8em">(−${brl0(tot.dv)})</span>`:''}</td><td class="num">${pct(tot.or>0?flT/tot.or:null)}</td><td class="num">100,0%</td></tr>`; })();
 }
 document.getElementById('loja-semana').addEventListener('change', e=>{ _lojaSemanaIdx=+e.target.value; renderLojaSemana(buildWeeks()[_lojaSemanaIdx]); });
 
@@ -905,7 +908,7 @@ function semanaSeqDe(iso_){ const ini=D(state.config.inicio), dt=D(iso_); if(dt<
 function renderSemanal(){
   const weeks=buildWeeks();
   document.querySelector('#tbl-semanal tbody').innerHTML = weeks.map(w=>{
-    const meta=metaRange(w.a,w.b), real=somaLanc('ft',w.a,w.b), perd=somaLanc('pd',w.a,w.b), dif=real-meta, p=meta>0?real/meta:null;
+    const meta=metaRange(w.a,w.b), real=fatLiq(w.a,w.b), perd=somaLanc('pd',w.a,w.b), dif=real-meta, p=meta>0?real/meta:null;
     return `<tr>
       <td>${w.num}</td><td>${w.label}</td>
       <td class="num">${brl(meta)}</td><td class="num">${brl(real)}</td>
@@ -933,7 +936,7 @@ function renderMensal(){
   const r=refDate(); const f=feriadoSet();
   let tMeta=0,tReal=0,tPerd=0;
   const body = meses.map(m=>{
-    const meta=metaRange(m.a,m.b), real=somaLanc('ft',m.a,m.b), perd=somaLanc('pd',m.a,m.b), dif=real-meta, p=meta>0?real/meta:null;
+    const meta=metaRange(m.a,m.b), real=fatLiq(m.a,m.b), perd=somaLanc('pd',m.a,m.b), dif=real-meta, p=meta>0?real/meta:null;
     tMeta+=meta; tReal+=real; tPerd+=perd;
     // dias úteis restantes: se o mês é o de referência, conta após a data ref; se futuro, mês inteiro; se passado, 0
     let duRest=0; const start = (r>=m.a && r<=m.b) ? iso(addDays(D(r),1)) : (r<m.a ? m.a : iso(addDays(D(m.b),1)));
@@ -1033,26 +1036,26 @@ function mesesDoPeriodo(){
 function renderGraficos(){
   const meses=mesesDoPeriodo(), weeks=buildWeeks();
   document.getElementById('g-mensal').innerHTML = chartBars(meses.map(m=>m.label),
-    [ {name:'Realizado', color:COR.real, values:meses.map(m=>somaLanc('ft',m.a,m.b))},
+    [ {name:'Realizado', color:COR.real, values:meses.map(m=>fatLiq(m.a,m.b))},
       {name:'Meta', color:COR.meta, values:meses.map(m=>metaRange(m.a,m.b))} ]);
   document.getElementById('g-semanal').innerHTML = chartLine(weeks.map(w=>'S'+w.num),
-    [ {name:'Realizado', color:COR.real, values:weeks.map(w=>somaLanc('ft',w.a,w.b))},
+    [ {name:'Realizado', color:COR.real, values:weeks.map(w=>fatLiq(w.a,w.b))},
       {name:'Meta', color:COR.meta, dash:true, values:weeks.map(w=>metaRange(w.a,w.b))} ]);
   let accR=0,accM=0; const aR=[],aM=[];
-  weeks.forEach(w=>{ accR+=somaLanc('ft',w.a,w.b); accM+=metaRange(w.a,w.b); aR.push(accR); aM.push(accM); });
+  weeks.forEach(w=>{ accR+=fatLiq(w.a,w.b); accM+=metaRange(w.a,w.b); aR.push(accR); aM.push(accM); });
   document.getElementById('g-acumulado').innerHTML = chartLine(weeks.map(w=>'S'+w.num),
     [ {name:'Realizado acum.', color:COR.real, values:aR},
       {name:'Meta acum.', color:COR.meta, dash:true, values:aM} ]);
-  const lojas=state.config.lojas.map(l=>({label:l.nome, value:somaLanc('ft',null,null,l.nome)})).sort((a,b)=>b.value-a.value);
+  const lojas=state.config.lojas.map(l=>({label:l.nome, value:fatLiq(null,null,l.nome)})).sort((a,b)=>b.value-a.value);
   document.getElementById('g-lojas').innerHTML = chartHBars(lojas);
   document.getElementById('g-funil').innerHTML = chartHBars([
     {label:'Orçamento', value:somaLanc('or'), color:COR.orc},
     {label:'Venda Quente', value:somaLanc('vq'), color:COR.vq},
-    {label:'Faturado', value:somaLanc('ft'), color:COR.ft},
+    {label:'Faturado', value:fatLiq(), color:COR.ft},
     {label:'Perdido', value:somaLanc('pd'), color:COR.pd},
   ]);
   // conversão por loja (Faturado ÷ Orçamento, período)
-  const conv=state.config.lojas.map(l=>{ const or=somaLanc('or',null,null,l.nome); return {label:l.nome, value:or>0?somaLanc('ft',null,null,l.nome)/or:0}; }).sort((a,b)=>b.value-a.value);
+  const conv=state.config.lojas.map(l=>{ const or=somaLanc('or',null,null,l.nome); return {label:l.nome, value:or>0?fatLiq(null,null,l.nome)/or:0}; }).sort((a,b)=>b.value-a.value);
   const maxConv=Math.max(1,...conv.map(c=>c.value));
   document.getElementById('g-conv').innerHTML = chartHBars(conv, {fmt:fmtPct, max:maxConv});
   // taxa de perda por mês (Perdido ÷ Orçamento)
@@ -1132,11 +1135,11 @@ function download(name, content, type){
   a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),500);
 }
 document.getElementById('btn-export-csv').addEventListener('click', ()=>{
-  let csv='Data;Loja;Regiao;Contatos;Orcamento;VendaQuente;OrcamentoPerdido;Faturado\n';
+  let csv='Data;Loja;Regiao;Contatos;Orcamento;VendaQuente;OrcamentoPerdido;Faturado;Devolucao\n';
   const regMap={}; state.config.lojas.forEach(l=>regMap[l.nome]=l.regiao);
   Object.keys(state.lanc).sort().forEach(k=>{
     const [d,lj]=k.split('|'); const v=state.lanc[k];
-    csv+=`${d};${lj};${regMap[lj]||''};${v.ct||0};${(v.or||0).toFixed(2)};${(v.vq||0).toFixed(2)};${(v.pd||0).toFixed(2)};${(v.ft||0).toFixed(2)}\n`;
+    csv+=`${d};${lj};${regMap[lj]||''};${v.ct||0};${(v.or||0).toFixed(2)};${(v.vq||0).toFixed(2)};${(v.pd||0).toFixed(2)};${(v.ft||0).toFixed(2)};${(v.dv||0).toFixed(2)}\n`;
   });
   download('lancamentos_faturamento.csv', csv, 'text/csv;charset=utf-8');
   toast('CSV exportado.');
@@ -1345,12 +1348,12 @@ function refreshLancGridPreserveFocus(){
   const d=document.getElementById('lanc-data').value; if(!d) return;
   const foco=document.activeElement;
   document.querySelectorAll('#tbl-lanc tbody tr[data-loja]').forEach(tr=>{
-    const k=d+'|'+tr.dataset.loja; const v=state.lanc[k]||{ct:0,or:0,vq:0,pd:0,ft:0};
+    const k=d+'|'+tr.dataset.loja; const v=state.lanc[k]||{ct:0,or:0,vq:0,pd:0,ft:0,dv:0};
     tr.querySelectorAll('input[data-f]').forEach(inp=>{ if(inp!==foco) inp.value=v[inp.dataset.f]||0; });
   });
   const tr=document.querySelector('#tbl-lanc tbody tr.total-row');
   if(tr){ tr.children[2].textContent=int(somaLanc('ct',d,d)); tr.children[3].textContent=brl(somaLanc('or',d,d));
-    tr.children[4].textContent=brl(somaLanc('vq',d,d)); tr.children[5].textContent=brl(somaLanc('pd',d,d)); tr.children[6].textContent=brl(somaLanc('ft',d,d)); }
+    tr.children[4].textContent=brl(somaLanc('vq',d,d)); tr.children[5].textContent=brl(somaLanc('pd',d,d)); tr.children[6].textContent=brl(somaLanc('ft',d,d)); tr.children[7].textContent=brl(somaLanc('dv',d,d)); }
 }
 function renderRemoto(){
   renderPainel(); renderLoja(); renderSemanal(); renderMensal();
