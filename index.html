@@ -544,7 +544,7 @@ function defaultState(){
   };
 }
 
-const STORE_KEY = 'maqcampo-faturamento-v1';
+const STORE_KEY = 'maqcampo-pecas-varejo-v1';
 let state = load();
 
 function load(){
@@ -1191,9 +1191,9 @@ const GRAPH_SCOPES = ['Files.ReadWrite','Sites.ReadWrite.All','User.Read'];
 const SP_HOSTNAME   = 'maqcampoirrigacao.sharepoint.com';
 const SP_SITE_PATH  = '/sites/MCPOIRRIGACAO';
 const SP_BIBLIOTECA = 'Documentos Compartilhados';
-const SP_PASTA      = 'Faturamento';                 // pasta própria deste app
-const DADOS_FILE    = 'faturamento_dados.json';      // { config, lanc }
-const ACESSO_FILE   = 'faturamento_acesso.json';     // { emailsAutorizados, emailsComuns }
+const SP_PASTA      = 'Pecas Varejo';                // pasta própria deste app
+const DADOS_FILE    = 'pecas_varejo_dados.json';     // { config, lanc }
+const ACESSO_FILE   = 'pecas_varejo_acesso.json';    // { emailsAutorizados, emailsComuns }
 
 let msalInstance=null, msAccount=null, msalReady=false;
 let acesso={ emailsAutorizados:[], emailsComuns:[] };
