@@ -1173,6 +1173,10 @@ function initRef(){
    ========================================================================= */
 function getRedirectUri(){
   const loc = window.location;
+  // GitHub Pages — URL canônica fixa (cadastrar esta no Azure como SPA)
+  if(loc.hostname === 'mcpoirrigacao.github.io'){
+    return 'https://mcpoirrigacao.github.io/pecas/';
+  }
   if(loc.hostname.includes('sharepoint.com') || loc.hostname.includes('onedrive.live.com')){
     return loc.href.replace(/\/[^\/]*$/, '/redirect.html').split('?')[0].split('#')[0];
   }
