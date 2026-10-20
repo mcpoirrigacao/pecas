@@ -544,7 +544,7 @@ function defaultState(){
   };
 }
 
-const STORE_KEY = 'maqcampo-faturamento-v1';
+const STORE_KEY = 'maqcampo-pecas-varejo-v1';
 let state = load();
 
 function load(){
@@ -1191,9 +1191,14 @@ const GRAPH_SCOPES = ['Files.ReadWrite','Sites.ReadWrite.All','User.Read'];
 const SP_HOSTNAME   = 'maqcampoirrigacao.sharepoint.com';
 const SP_SITE_PATH  = '/sites/MCPOIRRIGACAO';
 const SP_BIBLIOTECA = 'Documentos Compartilhados';
-const SP_PASTA      = 'Faturamento';                 // pasta própria deste app
-const DADOS_FILE    = 'faturamento_dados.json';      // { config, lanc }
-const ACESSO_FILE   = 'faturamento_acesso.json';     // { emailsAutorizados, emailsComuns }
+const SP_PASTA      = 'Pecas Varejo';                // pasta própria deste app
+const DADOS_FILE    = 'pecas_varejo_dados.json';     // { config, lanc }
+const ACESSO_FILE   = 'pecas_varejo_acesso.json';    // { emailsAutorizados, emailsComuns }
+// Pasta legada (migração automática one-shot, quando a pasta nova estiver vazia)
+const LEGACY_PASTA  = 'Faturamento';
+const LEGACY_DADOS  = 'faturamento_dados.json';
+const LEGACY_ACESSO = 'faturamento_acesso.json';
+function spPathIn(pasta,file){ return `/${SP_BIBLIOTECA}/${pasta}/${file}`; }
 
 let msalInstance=null, msAccount=null, msalReady=false;
 let acesso={ emailsAutorizados:[], emailsComuns:[] };
@@ -1373,13 +1378,31 @@ async function sincronizarNuvem(silencioso){
   const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));
   if(ac.ok && ac.data && (ac.data.emailsAutorizados||ac.data.emailsComuns)){
     acesso={emailsAutorizados:ac.data.emailsAutorizados||[], emailsComuns:ac.data.emailsComuns||[]}; acessoEtag=ac.etag;
+  } else if(ac.ok && ac.missing){
+    // migração one-shot: copia a lista de usuários da pasta legada
+    const lac=await graphGetJsonEtag(spPathIn(LEGACY_PASTA, LEGACY_ACESSO));
+    if(lac.ok && lac.data && (lac.data.emailsAutorizados||lac.data.emailsComuns)){
+      acesso={emailsAutorizados:lac.data.emailsAutorizados||[], emailsComuns:lac.data.emailsComuns||[]};
+      await ensureFolder();
+      const r=await graphPutEtag(spPath(ACESSO_FILE), new TextEncoder().encode(JSON.stringify(acesso)), null);
+      if(r.ok) acessoEtag=r.etag;
+    }
   }
-  const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
+  let dd=await graphGetJsonEtag(spPath(DADOS_FILE));
+  if(dd.ok && dd.missing){
+    // migração one-shot: copia os dados da pasta legada para a nova
+    const ld=await graphGetJsonEtag(spPathIn(LEGACY_PASTA, LEGACY_DADOS));
+    if(ld.ok && ld.data && ld.data.config && ld.data.lanc){
+      await ensureFolder();
+      const r=await graphPutEtag(spPath(DADOS_FILE), new TextEncoder().encode(JSON.stringify(ld.data)), null);
+      if(r.ok){ dd={ok:true, data:ld.data, etag:r.etag}; if(!silencioso) toast('Dados migrados para a pasta Pecas Varejo.'); }
+    }
+  }
   if(dd.ok && dd.data && dd.data.config && dd.data.lanc){
     state = (dirtyLanc.size||dirtyConfig.size) ? aplicarLocalSobre(dd.data) : dd.data;
     cloudEtag=dd.etag; try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){}
   } else if(dd.ok && dd.missing){
-    cloudEtag=null; // arquivo ainda não existe → primeiro salvamento cria
+    cloudEtag=null; // nada na pasta nova nem na legada → primeiro salvamento cria
   }
   initRef(); renderRemoto();
   setSyncStatus('☁ conectado','ok');
