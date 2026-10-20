@@ -1198,11 +1198,17 @@ const SP_BIBLIOTECA = 'Documentos Compartilhados';
 const SP_PASTA      = 'Pecas Varejo';                // pasta própria deste app
 const DADOS_FILE    = 'pecas_varejo_dados.json';     // { config, lanc }
 const ACESSO_FILE   = 'pecas_varejo_acesso.json';    // { emailsAutorizados, emailsComuns }
-// Pasta legada (migração automática one-shot, quando a pasta nova estiver vazia)
+// Pasta legada (fallback para localizar dados já existentes)
 const LEGACY_PASTA  = 'Faturamento';
 const LEGACY_DADOS  = 'faturamento_dados.json';
 const LEGACY_ACESSO = 'faturamento_acesso.json';
 function spPathIn(pasta,file){ return `/${SP_BIBLIOTECA}/${pasta}/${file}`; }
+// Caminhos ativos (resolvidos no login): o app lê E grava onde os dados realmente estão.
+// Procura nesta ordem: pasta nova + nome novo; pasta nova + nome legado; pasta legada + nome legado.
+let DADOS_PATH  = spPath(DADOS_FILE);
+let ACESSO_PATH = spPath(ACESSO_FILE);
+function candDados(){ return [ spPath(DADOS_FILE), spPathIn(SP_PASTA, LEGACY_DADOS), spPathIn(LEGACY_PASTA, LEGACY_DADOS) ]; }
+function candAcesso(){ return [ spPath(ACESSO_FILE), spPathIn(SP_PASTA, LEGACY_ACESSO), spPathIn(LEGACY_PASTA, LEGACY_ACESSO) ]; }
 
 let msalInstance=null, msAccount=null, msalReady=false;
 let acesso={ emailsAutorizados:[], emailsComuns:[] };
@@ -1379,34 +1385,27 @@ function renderRemoto(){
 /* ---------- carregar dados compartilhados ---------- */
 async function sincronizarNuvem(silencioso){
   if(!msAccount) return;
-  const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));
-  if(ac.ok && ac.data && (ac.data.emailsAutorizados||ac.data.emailsComuns)){
-    acesso={emailsAutorizados:ac.data.emailsAutorizados||[], emailsComuns:ac.data.emailsComuns||[]}; acessoEtag=ac.etag;
-  } else if(ac.ok && ac.missing){
-    // migração one-shot: copia a lista de usuários da pasta legada
-    const lac=await graphGetJsonEtag(spPathIn(LEGACY_PASTA, LEGACY_ACESSO));
-    if(lac.ok && lac.data && (lac.data.emailsAutorizados||lac.data.emailsComuns)){
-      acesso={emailsAutorizados:lac.data.emailsAutorizados||[], emailsComuns:lac.data.emailsComuns||[]};
-      await ensureFolder();
-      const r=await graphPutEtag(spPath(ACESSO_FILE), new TextEncoder().encode(JSON.stringify(acesso)), null);
-      if(r.ok) acessoEtag=r.etag;
+  // ACESSO: localiza onde a lista de usuários existe; passa a ler/gravar nesse caminho
+  acessoEtag=null;
+  for(const p of candAcesso()){
+    const r=await graphGetJsonEtag(p);
+    if(r.ok && r.data && (r.data.emailsAutorizados||r.data.emailsComuns)){
+      acesso={emailsAutorizados:r.data.emailsAutorizados||[], emailsComuns:r.data.emailsComuns||[]};
+      ACESSO_PATH=p; acessoEtag=r.etag; break;
     }
   }
-  let dd=await graphGetJsonEtag(spPath(DADOS_FILE));
-  if(dd.ok && dd.missing){
-    // migração one-shot: copia os dados da pasta legada para a nova
-    const ld=await graphGetJsonEtag(spPathIn(LEGACY_PASTA, LEGACY_DADOS));
-    if(ld.ok && ld.data && ld.data.config && ld.data.lanc){
-      await ensureFolder();
-      const r=await graphPutEtag(spPath(DADOS_FILE), new TextEncoder().encode(JSON.stringify(ld.data)), null);
-      if(r.ok){ dd={ok:true, data:ld.data, etag:r.etag}; if(!silencioso) toast('Dados migrados para a pasta Pecas Varejo.'); }
-    }
+  // DADOS: localiza onde os lançamentos existem; passa a ler/gravar nesse caminho
+  let dd=null; cloudEtag=null;
+  for(const p of candDados()){
+    const r=await graphGetJsonEtag(p);
+    if(r.ok && r.data && r.data.config && r.data.lanc){ dd=r; DADOS_PATH=p; break; }
   }
-  if(dd.ok && dd.data && dd.data.config && dd.data.lanc){
+  if(dd && dd.data){
     state = (dirtyLanc.size||dirtyConfig.size) ? aplicarLocalSobre(dd.data) : dd.data;
     cloudEtag=dd.etag; try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){}
-  } else if(dd.ok && dd.missing){
-    cloudEtag=null; // nada na pasta nova nem na legada → primeiro salvamento cria
+  } else {
+    // nada encontrado em nenhum caminho → grava na pasta/arquivo canônico
+    DADOS_PATH=spPath(DADOS_FILE); ACESSO_PATH=spPath(ACESSO_FILE); cloudEtag=null;
   }
   initRef(); renderRemoto();
   setSyncStatus('☁ conectado','ok');
@@ -1430,14 +1429,14 @@ async function salvarDados(){
   let ok=false, tent=0;
   while(tent<5 && !ok){
     tent++;
-    const res=await graphPutEtag(spPath(DADOS_FILE), new TextEncoder().encode(JSON.stringify(state)), cloudEtag);
+    const res=await graphPutEtag(DADOS_PATH, new TextEncoder().encode(JSON.stringify(state)), cloudEtag);
     if(res.ok){
       cloudEtag=res.etag||cloudEtag; dirtyLanc.clear(); dirtyConfig.clear(); ok=true;
       setSyncStatus('☁ salvo','ok');
     } else if(res.status===412 || res.status===409){
       // Conflito: outra pessoa gravou antes. Baixa a versão nova, remescla as minhas mudanças e tenta de novo.
       setSyncStatus('⟳ mesclando…','saving');
-      const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
+      const dd=await graphGetJsonEtag(DADOS_PATH);
       if(dd.ok && dd.data && dd.data.config && dd.data.lanc){
         state=aplicarLocalSobre(dd.data); cloudEtag=dd.etag;
         try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){}
@@ -1461,7 +1460,7 @@ async function puxarSeMudou(){
   if(dirtyLanc.size || dirtyConfig.size) return;              // não puxa enquanto eu tenho edições pendentes
   const a=document.activeElement;
   if(a && a.tagName==='INPUT' && a.type==='number') return;   // não puxa enquanto digito um número
-  const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
+  const dd=await graphGetJsonEtag(DADOS_PATH);
   if(dd.ok && dd.etag && dd.etag!==cloudEtag && dd.data && dd.data.config && dd.data.lanc){
     state=dd.data; cloudEtag=dd.etag; try{ localStorage.setItem(STORE_KEY, JSON.stringify(state)); }catch(e){}
     renderRemoto(); setSyncStatus('⟳ atualizado agora','ok');
@@ -1477,10 +1476,10 @@ async function saveAcesso(){
   const uniao=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));
   while(tent<5 && !ok){
     tent++;
-    const res=await graphPutEtag(spPath(ACESSO_FILE), new TextEncoder().encode(JSON.stringify(acesso)), acessoEtag);
+    const res=await graphPutEtag(ACESSO_PATH, new TextEncoder().encode(JSON.stringify(acesso)), acessoEtag);
     if(res.ok){ acessoEtag=res.etag||acessoEtag; ok=true; }
     else if(res.status===412 || res.status===409){
-      const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));
+      const ac=await graphGetJsonEtag(ACESSO_PATH);
       if(ac.ok && ac.data){
         acesso.emailsAutorizados=uniao(ac.data.emailsAutorizados, acesso.emailsAutorizados);
         acesso.emailsComuns=uniao(ac.data.emailsComuns, acesso.emailsComuns).filter(e=>!acesso.emailsAutorizados.includes(e));
